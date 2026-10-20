@@ -127,16 +127,19 @@ Approve everything below a given path, optionally restricted to a user:
 
 ## Glossary suggestions
 
-In the Crowdin web interface, the pending approvals of a language may list a "Glossary" entry next to your source
-files. This tool does **not** list or approve those:
+In the Crowdin web interface, the pending approvals of a language list a "Glossary" entry next to your source files.
+Crowdin stores the glossary of a project as a regular file (title "Glossary", path `/typo3-cms.tbx` in the TYPO3
+projects) whose strings are the glossary terms. Suggested glossary translations are therefore listed and approved
+like any other translation, under the path `/typo3-cms.tbx`:
 
-- Glossary terms are not translations of source strings. They live in a glossary, which is a separate resource that
-  is attached to projects, not in the project's source files.
-- `translations:unapproved` and `translations:approve` only work on string translations of the project files.
-- In the Crowdin API, a glossary term has a `status` (such as preferred or admitted), but this is the usage status of
-  the term, not a review state, and glossary terms cannot be filtered by pending approval. Terms and concepts only
-  expose their author and creation date, so there is no reliable way to tell a suggestion from an accepted term.
-  Suggested glossary translations therefore have to be reviewed in the Crowdin web interface.
+```bash
+./crowdin-cli translations:unapproved 368815 fr --path=/typo3-cms.tbx
+./crowdin-cli translations:approve 368815 fr --path=/typo3-cms.tbx --dry-run -v
+```
+
+Without `--path`, glossary entries are mixed in the list with the other files, and the default `--limit` may hide
+them. Note that this is different from the glossary resource itself (*Resources > Glossaries*), whose terms and
+concepts have no review state in the Crowdin API.
 
 ## Development
 

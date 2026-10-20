@@ -29,34 +29,64 @@ final readonly class PendingTranslationRepository
     public function findUnapproved(int $projectId, string $languageId, ?string $user = null, ?string $pathPrefix = null): array
     {
         $pending = [];
-        $fileIds = $pathPrefix === null ? [null] : $this->findFileIdsByPathPrefix($projectId, $pathPrefix);
-        foreach ($fileIds as $fileId) {
-            $offset = 0;
-            do {
-                $params = [
-                    'croql' => 'count of approvals = 0',
-                    'limit' => self::LIMIT,
-                    'offset' => $offset,
-                ];
-                if ($fileId !== null) {
-                    $params['fileId'] = $fileId;
-                }
-                $items = $this->crowdin->stringTranslation->listLanguageTranslations($projectId, $languageId, $params);
-                $count = 0;
-                /** @var LanguageTranslation $item */
-                foreach ($items as $item) {
-                    $count++;
+        if ($pathPrefix === null) {
+            $translations = [];
+            foreach ($this->listLanguageTranslations($projectId, $languageId, ['croql' => 'count of approvals = 0']) as $item) {
+                array_push($translations, ...$this->toPending($item));
+            }
+        } else {
+            // Crowdin does not accept "croql" together with "fileId": list the translations of every matching file
+            // and drop the approved ones
+            $translations = [];
+            foreach ($this->findFileIdsByPathPrefix($projectId, $pathPrefix) as $fileId) {
+                $approved = [];
+                foreach ($this->listLanguageTranslations($projectId, $languageId, ['fileId' => $fileId, 'approvedOnly' => 1]) as $item) {
                     foreach ($this->toPending($item) as $translation) {
-                        if ($user === null || $translation->isSuggestedBy($user)) {
-                            $pending[] = $translation;
+                        $approved[$translation->translationId] = true;
+                    }
+                }
+                foreach ($this->listLanguageTranslations($projectId, $languageId, ['fileId' => $fileId]) as $item) {
+                    foreach ($this->toPending($item) as $translation) {
+                        if (!isset($approved[$translation->translationId])) {
+                            $translations[] = $translation;
                         }
                     }
                 }
-                $offset += self::LIMIT;
-            } while ($count === self::LIMIT);
+            }
+        }
+
+        foreach ($translations as $translation) {
+            if ($user === null || $translation->isSuggestedBy($user)) {
+                $pending[] = $translation;
+            }
         }
 
         return $pending;
+    }
+
+    /**
+     * @param array<string, mixed> $params
+     * @return list<LanguageTranslation>
+     */
+    private function listLanguageTranslations(int $projectId, string $languageId, array $params): array
+    {
+        $result = [];
+        $offset = 0;
+        do {
+            $items = $this->crowdin->stringTranslation->listLanguageTranslations($projectId, $languageId, $params + [
+                'limit' => self::LIMIT,
+                'offset' => $offset,
+            ]);
+            $count = 0;
+            /** @var LanguageTranslation $item */
+            foreach ($items as $item) {
+                $count++;
+                $result[] = $item;
+            }
+            $offset += self::LIMIT;
+        } while ($count === self::LIMIT);
+
+        return $result;
     }
 
     /**

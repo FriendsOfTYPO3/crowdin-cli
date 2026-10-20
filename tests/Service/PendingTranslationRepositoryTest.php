@@ -114,19 +114,23 @@ final class PendingTranslationRepositoryTest extends TestCase
             ['file', $fileApi],
         ]);
 
-        $fileIds = [];
+        $calls = [];
         $this->stringTranslation
-            ->expects(self::exactly(2))
+            ->expects(self::exactly(4))
             ->method('listLanguageTranslations')
-            ->willReturnCallback(function (int $projectId, string $languageId, array $params) use (&$fileIds): ModelCollection {
-                $fileIds[] = $params['fileId'];
+            ->willReturnCallback(function (int $projectId, string $languageId, array $params) use (&$calls): ModelCollection {
+                self::assertArrayNotHasKey('croql', $params);
+                $fileId = $params['fileId'];
+                $calls[] = [$fileId, $params['approvedOnly'] ?? 0];
+                $items = [self::languageTranslation($fileId, $fileId * 10, 'alice'), self::languageTranslation($fileId + 100, $fileId * 10 + 1, 'bob')];
 
-                return self::collection([self::languageTranslation($params['fileId'], $params['fileId'] * 10, 'alice')]);
+                // The second translation of each file is approved
+                return self::collection(isset($params['approvedOnly']) ? [$items[1]] : $items);
             });
 
         $result = (new PendingTranslationRepository($crowdin))->findUnapproved(123, 'de', null, '14.3/typo3/sysext/backend');
 
-        self::assertSame([1, 3], $fileIds);
+        self::assertSame([[1, 1], [1, 0], [3, 1], [3, 0]], $calls);
         self::assertSame([10, 30], array_map(static fn($t): int => $t->translationId, $result));
     }
 
