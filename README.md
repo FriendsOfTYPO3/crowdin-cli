@@ -64,6 +64,23 @@ Shows, per language, the percentage of strings that are
 - **Translated, not approved** (a translation exists but still waits for approval),
 - **Translated (total)**, the sum of both.
 
+### Proofreaders of a project
+
+```bash
+./crowdin-cli project:proofreaders 368815
+./crowdin-cli project:proofreaders 368815 --language=fr
+```
+
+Shows, per language, the members with the proofreader permission for it (`-` if there is none). The owner and the
+managers can proofread every language and are listed below the table instead of in every row. Blocked and pending
+members are ignored.
+
+This reads the members of the project (`GET /projects/{projectId}/members`), which is more restricted than the other
+commands: the token needs a scope that allows reading project members (most likely *Project Members* in the token
+scopes, the Crowdin documentation does not state it in a form we could verify) and its owner needs to be a manager of
+the project. Without it, the command stops with a message mentioning HTTP 401 (invalid token), 403 (missing scope or
+role) or 404 (unknown project) instead of a table.
+
 ### Guided review (interactive)
 
 `interactive` (alias `review`) walks through the whole review workflow with questions, instead of you chaining the
