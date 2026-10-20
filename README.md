@@ -5,10 +5,11 @@ suggested translations. It builds upon [`friendsoftypo3/crowdin-base`](https://g
 
 ## Requirements
 
-- PHP 8.5 with the extensions `json` and `zip`
+- PHP 8.5 with the extension `json`
 - [Composer](https://getcomposer.org/)
 - A Crowdin personal access token with access to the TYPO3 projects. To approve translations, the token owner needs
-  the proof-reader (or manager) role in these projects.
+  the proofreader (or manager) role in these projects. You can generate such a token (scope "Projects") in Crowdin from
+  [User Account > Settings > API](https://crowdin.com/settings#api-key)
 
 ## Installation
 
