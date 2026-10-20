@@ -56,15 +56,42 @@ final readonly class PendingTranslationRepository
      */
     public function findSourceTexts(int $projectId, array $stringIds): array
     {
+        return array_map(static fn(array $source): string => $source['text'], $this->findSources($projectId, $stringIds));
+    }
+
+    /**
+     * @param list<int> $stringIds
+     * @return array<int, array{text: string, fileId: int}> indexed by string ID
+     */
+    public function findSources(int $projectId, array $stringIds): array
+    {
         // The strings list endpoint cannot filter by IDs, so fetch them one by one
-        $texts = [];
+        $sources = [];
         foreach (array_unique($stringIds) as $stringId) {
+            $string = $this->crowdin->sourceString->get($projectId, $stringId);
             /** @var string|list<string>|null $text */
-            $text = $this->crowdin->sourceString->get($projectId, $stringId)?->getText();
-            $texts[$stringId] = is_array($text) ? implode(' | ', $text) : (string)$text;
+            $text = $string?->getText();
+            $sources[$stringId] = [
+                'text' => is_array($text) ? implode(' | ', $text) : (string)$text,
+                'fileId' => $string?->getFileId() ?? 0,
+            ];
         }
 
-        return $texts;
+        return $sources;
+    }
+
+    /**
+     * @param list<int> $fileIds
+     * @return array<int, string> file paths in Crowdin indexed by file ID
+     */
+    public function findFilePaths(int $projectId, array $fileIds): array
+    {
+        $paths = [];
+        foreach (array_unique($fileIds) as $fileId) {
+            $paths[$fileId] = $this->crowdin->file->get($projectId, $fileId)?->getPath() ?? '(unknown file)';
+        }
+
+        return $paths;
     }
 
     public function approve(int $projectId, int $translationId): void

@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace TYPO3\CrowdinCli\Tests\Service;
 
+use CrowdinApiClient\Api\FileApi;
 use CrowdinApiClient\Api\SourceStringApi;
 use CrowdinApiClient\Api\StringTranslationApi;
 use CrowdinApiClient\Crowdin;
+use CrowdinApiClient\Model\File;
 use CrowdinApiClient\Model\LanguageTranslation;
 use CrowdinApiClient\Model\SourceString;
 use CrowdinApiClient\ModelCollection;
@@ -184,6 +186,33 @@ final class PendingTranslationRepositoryTest extends TestCase
         $texts = $this->subject->findSourceTexts(123, [1, 2, 1]);
 
         self::assertSame([1 => 'Hello', 2 => 'One file | %d files'], $texts);
+    }
+
+    public function testFindSourcesReturnsTextAndFileId(): void
+    {
+        $string = $this->createMock(SourceString::class);
+        $string->method('getText')->willReturn('Hello');
+        $string->method('getFileId')->willReturn(42);
+        $this->sourceString->expects(self::once())->method('get')->with(123, 1)->willReturn($string);
+
+        self::assertSame([1 => ['text' => 'Hello', 'fileId' => 42]], $this->subject->findSources(123, [1]));
+    }
+
+    public function testFindFilePathsFetchesEachFileOnce(): void
+    {
+        $fileApi = $this->createMock(FileApi::class);
+        $fileApi->expects(self::once())->method('get')->with(123, 42)->willReturnCallback(function (): File {
+            $file = $this->createMock(File::class);
+            $file->method('getPath')->willReturn('/typo3/core/de.xlf');
+
+            return $file;
+        });
+        $crowdin = $this->createMock(Crowdin::class);
+        $crowdin->method('__get')->willReturnMap([['file', $fileApi]]);
+
+        $paths = (new PendingTranslationRepository($crowdin))->findFilePaths(123, [42, 42]);
+
+        self::assertSame([42 => '/typo3/core/de.xlf'], $paths);
     }
 
     public function testApproveCreatesApproval(): void

@@ -55,7 +55,8 @@ final class TranslationsUnapprovedCommand extends Command
             $all = $pending;
             $total = count($pending);
             $pending = array_slice($pending, 0, $limit);
-            $sources = $this->repository->findSourceTexts($projectId, array_map(static fn($t): int => $t->stringId, $pending));
+            $sources = $this->repository->findSources($projectId, array_map(static fn($t): int => $t->stringId, $pending));
+            $paths = $this->repository->findFilePaths($projectId, array_values(array_unique(array_column($sources, 'fileId'))));
         } catch (\Throwable $e) {
             $io->error($e->getMessage());
             return Command::FAILURE;
@@ -66,20 +67,30 @@ final class TranslationsUnapprovedCommand extends Command
             return Command::SUCCESS;
         }
 
-        $rows = [];
-        foreach ($pending as $i => $t) {
-            if ($i > 0) {
-                $rows[] = new TableSeparator();
-            }
-            $rows[] = [
-                $t->translationId,
-                $t->authorLabel(),
-                substr($t->createdAt, 0, 10),
-                wordwrap($sources[$t->stringId] ?? '?', 50, "\n", true),
-                wordwrap($t->text, 50, "\n", true),
-            ];
+        // Group by file, ordered by path
+        $byFile = [];
+        foreach ($pending as $t) {
+            $byFile[$paths[$sources[$t->stringId]['fileId'] ?? 0] ?? '(unknown file)'][] = $t;
         }
-        $io->table(['Translation ID', 'Suggested by', 'Date', 'Source', 'Translation'], $rows);
+        ksort($byFile);
+
+        foreach ($byFile as $path => $translations) {
+            $io->section(sprintf('%s (%d)', $path, count($translations)));
+            $rows = [];
+            foreach ($translations as $i => $t) {
+                if ($i > 0) {
+                    $rows[] = new TableSeparator();
+                }
+                $rows[] = [
+                    $t->translationId,
+                    $t->authorLabel(),
+                    substr($t->createdAt, 0, 10),
+                    wordwrap($sources[$t->stringId]['text'] ?? '?', 50, "\n", true),
+                    wordwrap($t->text, 50, "\n", true),
+                ];
+            }
+            $io->table(['Translation ID', 'Suggested by', 'Date', 'Source', 'Translation'], $rows);
+        }
         $io->writeln(sprintf('Showing %d of %d unapproved translation(s).', count($pending), $total));
 
         // Summary per author (all unapproved translations) helps to decide on bulk approvals
