@@ -40,84 +40,10 @@ Run it again whenever projects are added or languages change (or use `./crowdin-
 All commands are run with `./crowdin-cli <command>` (in DDEV: `ddev exec ./crowdin-cli <command>`). Use `./crowdin-cli list` to see them and
 `./crowdin-cli <command> --help` for all options.
 
-### List projects
-
-```bash
-./crowdin-cli projects:list
-./crowdin-cli projects:list --refresh   # update the local configuration from Crowdin first
-./crowdin-cli projects:list -v          # also show the languages of every project
-```
-
-The ID in the first column is what the other commands expect as `<projectId>`.
-
-### Translation status of a project
-
-```bash
-./crowdin-cli project:status 368815
-```
-
-Use `--language=fr` (`-L`) to only show one language.
-
-Shows, per language, the percentage of strings that are
-
-- **Approved**,
-- **Translated, not approved** (a translation exists but still waits for approval),
-- **Translated (total)**, the sum of both.
-
-### Proofreaders of a project
-
-```bash
-./crowdin-cli project:proofreaders 368815
-./crowdin-cli project:proofreaders 368815 --language=fr
-```
-
-Shows, per language, the members with the proofreader permission for it (`-` if there is none). The owner and the
-managers can proofread every language and are listed below the table instead of in every row. Blocked and pending
-members are ignored.
-
-This reads the members of the project (`GET /projects/{projectId}/members`), which is more restricted than the other
-commands: the token needs a scope that allows reading project members (most likely *Project Members* in the token
-scopes, the Crowdin documentation does not state it in a form we could verify) and its owner needs to be a manager of
-the project. Without it, the command stops with a message mentioning HTTP 401 (invalid token), 403 (missing scope or
-role) or 404 (unknown project) instead of a table.
-
-### Contributors of a project in a language
-
-```bash
-./crowdin-cli project:contributors 368815 fr
-./crowdin-cli project:contributors 368815 fr --by=approved --from=2026-01-01 --limit=50
-```
-
-Ranks the members who contributed to a project in one language. Both the project and the language are required: the
-data comes from the "Top Members" report of Crowdin, which Crowdin generates on request for one project and language
-(a few API calls and a few seconds each time), so there is no overview of all languages at once.
-
-| Column      | Description                                                                          |
-|-------------|--------------------------------------------------------------------------------------|
-| Rank        | Position, contributors with the same figures share their rank.                       |
-| Translated  | Translations (or suggestions) the member made.                                       |
-| Approved    | Translations the member approved (as proofreader), not the approvals they received.  |
-| Votes       | Votes the member cast on translations of others.                                     |
-
-| Option                | Description                                                                          |
-|-----------------------|--------------------------------------------------------------------------------------|
-| `-b`, `--by=VALUE`    | Rank by `translated` (default) or `approved`.                                        |
-| `--unit=VALUE`        | Count `strings` (default), `words`, `chars` or `chars_with_spaces`.                  |
-| `--from=YYYY-MM-DD`   | Only count contributions as of this date (UTC). By default, since the project exists. |
-| `--to=YYYY-MM-DD`     | Only count contributions until the end of this day (UTC).                            |
-| `-l`, `--limit=N`     | Maximum number of contributors displayed (default: 20), `0` for all.                  |
-
-Members without any activity are left out. Note that automated accounts, such as the `TYPO3` account which imports
-translations in bulk, rank like anyone else.
-
-Like `project:proofreaders`, this needs a token allowed to generate project reports (most likely the *Reports* scope, to
-be verified in the Crowdin documentation) and the manager role in the project. Errors such as 401, 403 and 404 are
-reported with a message instead of a ranking.
-
 ### Guided review (interactive)
 
 `interactive` (alias `review`) walks through the whole review workflow with questions, instead of you chaining the
-commands below by hand:
+commands described further down by hand:
 
 ```bash
 ./crowdin-cli interactive
@@ -164,6 +90,30 @@ follow each other without waiting. The command needs a terminal and refuses to r
 
 Every approval made by `interactive` and `translations:approve` is recorded in `var/approvals.log` (see
 [Revoke approvals](#revoke-approvals)). At the end of the session its ID is displayed.
+
+### List projects
+
+```bash
+./crowdin-cli projects:list
+./crowdin-cli projects:list --refresh   # update the local configuration from Crowdin first
+./crowdin-cli projects:list -v          # also show the languages of every project
+```
+
+The ID in the first column is what the other commands expect as `<projectId>`.
+
+### Translation status of a project
+
+```bash
+./crowdin-cli project:status 368815
+```
+
+Use `--language=fr` (`-L`) to only show one language.
+
+Shows, per language, the percentage of strings that are
+
+- **Approved**,
+- **Translated, not approved** (a translation exists but still waits for approval),
+- **Translated (total)**, the sum of both.
 
 ### Review unapproved translations
 
@@ -260,6 +210,60 @@ like any other translation, under the path `/typo3-cms.tbx`:
 Without `--path`, glossary entries are mixed in the list with the other files, and the default `--limit` may hide
 them. Note that this is different from the glossary resource itself (*Resources > Glossaries*), whose terms and
 concepts have no review state in the Crowdin API.
+
+## Reporting
+
+Overviews of the people behind a project, rather than steps of the translation workflow.
+
+### Proofreaders of a project
+
+```bash
+./crowdin-cli project:proofreaders 368815
+./crowdin-cli project:proofreaders 368815 --language=fr
+```
+
+Shows, per language, the members with the proofreader permission for it (`-` if there is none). The owner and the
+managers can proofread every language and are listed below the table instead of in every row. Blocked and pending
+members are ignored.
+
+This reads the members of the project (`GET /projects/{projectId}/members`), which is more restricted than the other
+commands: the token needs a scope that allows reading project members (most likely *Project Members* in the token
+scopes, the Crowdin documentation does not state it in a form we could verify) and its owner needs to be a manager of
+the project. Without it, the command stops with a message mentioning HTTP 401 (invalid token), 403 (missing scope or
+role) or 404 (unknown project) instead of a table.
+
+### Contributors of a project in a language
+
+```bash
+./crowdin-cli project:contributors 368815 fr
+./crowdin-cli project:contributors 368815 fr --by=approved --from=2026-01-01 --limit=50
+```
+
+Ranks the members who contributed to a project in one language. Both the project and the language are required: the
+data comes from the "Top Members" report of Crowdin, which Crowdin generates on request for one project and language
+(a few API calls and a few seconds each time), so there is no overview of all languages at once.
+
+| Column      | Description                                                                          |
+|-------------|--------------------------------------------------------------------------------------|
+| Rank        | Position, contributors with the same figures share their rank.                       |
+| Translated  | Translations (or suggestions) the member made.                                       |
+| Approved    | Translations the member approved (as proofreader), not the approvals they received.  |
+| Votes       | Votes the member cast on translations of others.                                     |
+
+| Option                | Description                                                                          |
+|-----------------------|--------------------------------------------------------------------------------------|
+| `-b`, `--by=VALUE`    | Rank by `translated` (default) or `approved`.                                        |
+| `--unit=VALUE`        | Count `strings` (default), `words`, `chars` or `chars_with_spaces`.                  |
+| `--from=YYYY-MM-DD`   | Only count contributions as of this date (UTC). By default, since the project exists. |
+| `--to=YYYY-MM-DD`     | Only count contributions until the end of this day (UTC).                            |
+| `-l`, `--limit=N`     | Maximum number of contributors displayed (default: 20), `0` for all.                  |
+
+Members without any activity are left out. Note that automated accounts, such as the `TYPO3` account which imports
+translations in bulk, rank like anyone else.
+
+Like `project:proofreaders`, this needs a token allowed to generate project reports (most likely the *Reports* scope, to
+be verified in the Crowdin documentation) and the manager role in the project. Errors such as 401, 403 and 404 are
+reported with a message instead of a ranking.
 
 ## Development
 
