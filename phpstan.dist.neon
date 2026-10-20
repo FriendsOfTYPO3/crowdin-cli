@@ -2,7 +2,7 @@ parameters:
     phpVersion: 80500
     level: 9
     paths:
-        - app.php
+        - crowdin-cli
         - src/
         - tests/
     treatPhpDocTypesAsCertain: false

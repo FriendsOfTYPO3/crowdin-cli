@@ -2,6 +2,9 @@
   "name": "typo3/crowdin-cli",
   "description": "CLI for Crowdin in the context of TYPO3",
   "type": "project",
+  "bin": [
+    "crowdin-cli"
+  ],
   "license": "GPL-2.0-or-later",
   "authors": [
     {

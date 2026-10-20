@@ -32,19 +32,19 @@ Then fetch the list of projects once and store it locally:
 php bin/crowdinSetup
 ```
 
-Run it again whenever projects are added or languages change (or use `php app.php projects:list --refresh`).
+Run it again whenever projects are added or languages change (or use `./crowdin-cli projects:list --refresh`).
 
 ## Usage
 
-All commands are run with `php app.php <command>`. Use `php app.php list` to see them and
-`php app.php <command> --help` for all options.
+All commands are run with `./crowdin-cli <command>` (in DDEV: `ddev exec ./crowdin-cli <command>`). Use `./crowdin-cli list` to see them and
+`./crowdin-cli <command> --help` for all options.
 
 ### List projects
 
 ```bash
-php app.php projects:list
-php app.php projects:list --refresh   # update the local configuration from Crowdin first
-php app.php projects:list -v          # also show the languages of every project
+./crowdin-cli projects:list
+./crowdin-cli projects:list --refresh   # update the local configuration from Crowdin first
+./crowdin-cli projects:list -v          # also show the languages of every project
 ```
 
 The ID in the first column is what the other commands expect as `<projectId>`.
@@ -52,7 +52,7 @@ The ID in the first column is what the other commands expect as `<projectId>`.
 ### Translation status of a project
 
 ```bash
-php app.php project:status 368815
+./crowdin-cli project:status 368815
 ```
 
 Shows, per language, the percentage of strings that are
@@ -64,9 +64,9 @@ Shows, per language, the percentage of strings that are
 ### Review unapproved translations
 
 ```bash
-php app.php translations:unapproved <projectId> <language>
-php app.php translations:unapproved 368815 de
-php app.php translations:unapproved 368815 de --user=jdoe --limit=500
+./crowdin-cli translations:unapproved <projectId> <language>
+./crowdin-cli translations:unapproved 368815 de
+./crowdin-cli translations:unapproved 368815 de --user=jdoe --limit=500
 ```
 
 For each unapproved translation the command shows the translation ID, who suggested it (name and username), the
@@ -86,13 +86,13 @@ Source texts are fetched one by one, so large limits take a while.
 Approve specific translations, using the IDs shown by `translations:unapproved`:
 
 ```bash
-php app.php translations:approve 368815 de 1949785 1941579
+./crowdin-cli translations:approve 368815 de 1949785 1941579
 ```
 
 Approve everything a given user suggested in one language:
 
 ```bash
-php app.php translations:approve 368815 de --user=jdoe
+./crowdin-cli translations:approve 368815 de --user=jdoe
 ```
 
 | Option         | Description                                                                 |
@@ -108,9 +108,9 @@ warning. Combining IDs and `--user` approves only the given translations that we
 Recommended workflow for bulk approval:
 
 ```bash
-php app.php translations:unapproved 368815 de --user=jdoe      # review
-php app.php translations:approve 368815 de --user=jdoe --dry-run -v   # check what would be approved
-php app.php translations:approve 368815 de --user=jdoe          # approve (asks for confirmation)
+./crowdin-cli translations:unapproved 368815 de --user=jdoe      # review
+./crowdin-cli translations:approve 368815 de --user=jdoe --dry-run -v   # check what would be approved
+./crowdin-cli translations:approve 368815 de --user=jdoe          # approve (asks for confirmation)
 ```
 
 ## Development
