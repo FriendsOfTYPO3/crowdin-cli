@@ -92,6 +92,7 @@ commands below by hand:
    | `a`         | Approve the whole chunk.                                                     |
    | `e 3,7`     | Approve all *except* these ones (numbers as displayed; ranges like `2-4` work too). |
    | `o 1-4,9`   | Approve *only* these ones.                                                   |
+   | `d 2,5`     | Drop (permanently delete) these suggestions, after a confirmation. Cannot be undone. |
    | `s` (Enter) | Skip the chunk, they stay pending.                                           |
    | `v`         | Show details (translation ID, string ID, date, plural form), then ask again. |
    | `q`         | Quit.                                                                        |

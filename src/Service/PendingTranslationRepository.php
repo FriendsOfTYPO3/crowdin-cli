@@ -218,6 +218,14 @@ final readonly class PendingTranslationRepository
         return $approval->getId();
     }
 
+    /**
+     * Permanently deletes a translation (suggestion). This cannot be undone.
+     */
+    public function delete(int $projectId, int $translationId): void
+    {
+        $this->crowdin->stringTranslation->delete($projectId, $translationId);
+    }
+
     public function revokeApproval(int $projectId, int $approvalId): void
     {
         $this->crowdin->stringTranslation->deleteApproval($projectId, $approvalId);

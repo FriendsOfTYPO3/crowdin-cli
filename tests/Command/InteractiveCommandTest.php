@@ -168,6 +168,38 @@ final class InteractiveCommandTest extends TestCase
         self::assertSame([], $this->log->entries());
     }
 
+    public function testDropDeletesConfirmedSuggestions(): void
+    {
+        $deleted = [];
+        $this->stringTranslation->expects(self::never())->method('createApproval');
+        $this->stringTranslation
+            ->expects(self::once())
+            ->method('delete')
+            ->willReturnCallback(static function (int $projectId, int $translationId) use (&$deleted): void {
+                $deleted[] = $translationId;
+            });
+
+        // bob has a single suggestion: drop it, confirm
+        $this->tester->setInputs(['d 1', 'yes']);
+        $status = $this->tester->execute(['--project' => '123', '--language' => 'fr', '--user' => 'bob']);
+
+        self::assertSame(0, $status);
+        self::assertSame([13], $deleted);
+        self::assertStringContainsString('1 dropped', $this->tester->getDisplay());
+    }
+
+    public function testDropIsNotDoneWithoutConfirmation(): void
+    {
+        $this->stringTranslation->expects(self::never())->method('delete');
+
+        // Refuse the confirmation, then skip
+        $this->tester->setInputs(['d 1', 'no', 's']);
+        $status = $this->tester->execute(['--project' => '123', '--language' => 'fr', '--user' => 'bob']);
+
+        self::assertSame(0, $status);
+        self::assertStringNotContainsString('dropped', $this->tester->getDisplay());
+    }
+
     public function testNothingToDoWhenEverythingIsApproved(): void
     {
         $this->stringTranslation->expects(self::never())->method('listLanguageTranslations');

@@ -37,6 +37,9 @@ final class InteractiveCommand extends Command
     /** @var array<int, true> IDs of the translations approved during this run */
     private array $approvedIds = [];
 
+    /** @var array<int, true> IDs of the translations dropped (deleted) during this run */
+    private array $droppedIds = [];
+
     private bool $dryRun = false;
 
     public function __construct(
@@ -81,6 +84,7 @@ final class InteractiveCommand extends Command
 
         $this->sessionId = ApprovalLog::newSessionId();
         $this->approvedIds = [];
+        $this->droppedIds = [];
         $this->dryRun = (bool)$input->getOption('dry-run');
         if ($this->dryRun) {
             $io->note('Dry run: nothing will be approved.');
@@ -190,7 +194,7 @@ final class InteractiveCommand extends Command
         }
 
         while (true) {
-            $remaining = array_values(array_filter($pending, fn(PendingTranslation $t): bool => !isset($this->approvedIds[$t->translationId])));
+            $remaining = array_values(array_filter($pending, fn(PendingTranslation $t): bool => !isset($this->approvedIds[$t->translationId]) && !isset($this->droppedIds[$t->translationId])));
             if ($remaining === []) {
                 $io->success(sprintf('Nothing left to review in "%s".', $language));
                 return true;
@@ -261,10 +265,10 @@ final class InteractiveCommand extends Command
 
             while (true) {
                 /** @var string $answer */
-                $answer = $io->ask('[a] approve all  [e 3,7] all except  [o 3,7] only  [s] skip  [v] details  [q] quit', 's');
+                $answer = $io->ask('[a] approve all  [e 3,7] all except  [o 3,7] only  [d 3,7] drop  [s] skip  [v] details  [q] quit', 's');
                 $review = ReviewInput::parse($answer, count($chunk));
                 if ($review === null) {
-                    $io->error('Not understood. Examples: "a", "e 3,7", "o 1-4", "s", "v", "q".');
+                    $io->error('Not understood. Examples: "a", "e 3,7", "o 1-4", "d 2", "s", "v", "q".');
                     continue;
                 }
                 if ($review->action === ReviewInput::QUIT) {
@@ -282,6 +286,13 @@ final class InteractiveCommand extends Command
                         continue;
                     }
                     $this->approve($io, $projectId, $language, $chunk, $review->positions);
+                }
+                if ($review->action === ReviewInput::DROP) {
+                    $question = sprintf('Permanently delete %d suggestion(s) (position(s) %s)? This cannot be undone', count($review->positions), implode(', ', $review->positions));
+                    if (!$io->confirm($question, false)) {
+                        continue;
+                    }
+                    $this->drop($io, $projectId, $chunk, $review->positions);
                 }
                 break;
             }
@@ -352,6 +363,32 @@ final class InteractiveCommand extends Command
             }
         }
         $io->writeln(sprintf($this->dryRun ? '<info>%d translation(s) would be approved.</info>' : '<info>%d approved</info>%s', $approved, $failed > 0 ? sprintf(', <error>%d failed</error> (they stay pending)', $failed) : ''));
+    }
+
+    /**
+     * @param list<PendingTranslation> $chunk
+     * @param list<int> $positions 1-based
+     */
+    private function drop(SymfonyStyle $io, int $projectId, array $chunk, array $positions): void
+    {
+        $dropped = 0;
+        $failed = 0;
+        foreach ($positions as $position) {
+            $t = $chunk[$position - 1];
+            if ($this->dryRun) {
+                $dropped++;
+                continue;
+            }
+            try {
+                $this->repository->delete($projectId, $t->translationId);
+                $this->droppedIds[$t->translationId] = true;
+                $dropped++;
+            } catch (\Throwable $e) {
+                $failed++;
+                $io->warning(sprintf('Translation %d: %s', $t->translationId, $e->getMessage()));
+            }
+        }
+        $io->writeln(sprintf($this->dryRun ? '<info>%d translation(s) would be dropped.</info>' : '<info>%d dropped</info>%s', $dropped, $failed > 0 ? sprintf(', <error>%d failed</error> (they stay pending)', $failed) : ''));
     }
 
     /**

@@ -5,19 +5,20 @@ declare(strict_types=1);
 namespace TYPO3\CrowdinCli\Service;
 
 /**
- * Answer of the user to a chunk of translations to review: approve all, all except some, only some, skip, ...
+ * Answer of the user to a chunk of translations to review: approve all, all except some, only some, drop some, skip, ...
  *
  * Translations are referred to by their position (1-based) in the displayed chunk.
  */
 final readonly class ReviewInput
 {
     public const string APPROVE = 'approve';
+    public const string DROP = 'drop';
     public const string SKIP = 'skip';
     public const string DETAILS = 'details';
     public const string QUIT = 'quit';
 
     /**
-     * @param list<int> $positions 1-based positions of the translations to approve (for APPROVE only)
+     * @param list<int> $positions 1-based positions of the translations to approve or drop (for APPROVE and DROP only)
      */
     private function __construct(
         public string $action,
@@ -49,13 +50,17 @@ final readonly class ReviewInput
                 return new self(self::QUIT);
         }
 
-        // "e 3,7" (all except) or "o 3,7" (only)
-        if (preg_match('/^(e|except|o|only)\s+(.+)$/', $input, $matches) !== 1) {
+        // "e 3,7" (all except), "o 3,7" (only) or "d 3,7" (drop)
+        if (preg_match('/^(e|except|o|only|d|drop)\s+(.+)$/', $input, $matches) !== 1) {
             return null;
         }
         $positions = self::parsePositions($matches[2], $chunkSize);
         if ($positions === null) {
             return null;
+        }
+
+        if (in_array($matches[1], ['d', 'drop'], true)) {
+            return new self(self::DROP, $positions);
         }
 
         return in_array($matches[1], ['e', 'except'], true)

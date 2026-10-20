@@ -23,6 +23,8 @@ final class ReviewInputTest extends TestCase
         yield 'all except one' => ['e 3', ReviewInput::APPROVE, [1, 2, 4, 5]];
         yield 'all except several' => ['except 1, 5', ReviewInput::APPROVE, [2, 3, 4]];
         yield 'all except everything' => ['e 1-5', ReviewInput::APPROVE, []];
+        yield 'drop some' => ['d 2,4', ReviewInput::DROP, [2, 4]];
+        yield 'drop a range' => ['drop 2-3', ReviewInput::DROP, [2, 3]];
         yield 'only some' => ['o 2,4', ReviewInput::APPROVE, [2, 4]];
         yield 'only a range' => ['only 2-4', ReviewInput::APPROVE, [2, 3, 4]];
         yield 'only, unsorted with duplicates' => ['o 4 2 4', ReviewInput::APPROVE, [2, 4]];
