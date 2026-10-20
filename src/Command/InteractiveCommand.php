@@ -15,6 +15,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use TYPO3\CrowdinCli\Entity\LanguageProgress;
 use TYPO3\CrowdinCli\Entity\PendingTranslation;
 use TYPO3\CrowdinCli\Service\ApprovalLog;
+use TYPO3\CrowdinCli\Service\CellText;
 use TYPO3\CrowdinCli\Service\PendingTranslationRepository;
 use TYPO3\CrowdinCli\Service\ProjectProgressRepository;
 use TYPO3\CrowdinCli\Service\ProjectResolver;
@@ -314,8 +315,8 @@ final class InteractiveCommand extends Command
             $rows[] = [
                 $i + 1,
                 $t->authorLabel(),
-                wordwrap($sources[$t->stringId]['text'] ?? '?', 50, "\n", true),
-                wordwrap($t->text, 50, "\n", true),
+                CellText::wrap($sources[$t->stringId]['text'] ?? '?'),
+                CellText::wrap($t->text),
             ];
         }
         $io->table(['#', 'Suggested by', 'Source', 'Translation'], $rows);

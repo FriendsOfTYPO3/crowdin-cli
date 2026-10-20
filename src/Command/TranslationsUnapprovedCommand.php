@@ -12,6 +12,7 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
+use TYPO3\CrowdinCli\Service\CellText;
 use TYPO3\CrowdinCli\Service\PendingTranslationRepository;
 
 #[AsCommand(name: 'translations:unapproved', description: 'List translations which have not been approved yet, with their author')]
@@ -89,8 +90,8 @@ final class TranslationsUnapprovedCommand extends Command
                     $t->translationId,
                     $t->authorLabel(),
                     substr($t->createdAt, 0, 10),
-                    wordwrap($sources[$t->stringId]['text'] ?? '?', 50, "\n", true),
-                    wordwrap($t->text, 50, "\n", true),
+                    CellText::wrap($sources[$t->stringId]['text'] ?? '?'),
+                    CellText::wrap($t->text),
                 ];
             }
             $io->table(['Translation ID', 'Suggested by', 'Date', 'Source', 'Translation'], $rows);
