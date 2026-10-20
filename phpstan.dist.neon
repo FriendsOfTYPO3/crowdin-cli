@@ -1,0 +1,8 @@
+parameters:
+    phpVersion: 80500
+    level: 9
+    paths:
+        - app.php
+        - src/
+        - tests/
+    treatPhpDocTypesAsCertain: false

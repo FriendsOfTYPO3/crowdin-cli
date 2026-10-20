@@ -1,0 +1,37 @@
+<?php
+
+declare(strict_types=1);
+
+use DI\ContainerBuilder;
+use FriendsOfTYPO3\CrowdinBase\Command\SetupCommand;
+use Symfony\Component\Console\Application;
+use Symfony\Component\Console\Command\Command;
+use TYPO3\CrowdinCli\Command\ProjectsListCommand;
+use TYPO3\CrowdinCli\Command\ProjectStatusCommand;
+use TYPO3\CrowdinCli\Command\TranslationsApproveCommand;
+use TYPO3\CrowdinCli\Command\TranslationsUnapprovedCommand;
+
+// vendor libraries still call functions deprecated in PHP 8.5
+error_reporting(E_ALL & ~E_DEPRECATED);
+
+require __DIR__ . '/vendor/autoload.php';
+
+// Reuse the container definitions (settings, Crowdin client, configuration reader/writer) of crowdin-base
+$basePath = \Composer\InstalledVersions::getInstallPath('friendsoftypo3/crowdin-base');
+$containerBuilder = new ContainerBuilder();
+$containerBuilder->addDefinitions($basePath . '/config/container.php');
+$container = $containerBuilder->build();
+
+$app = new Application('Crowdin-CLI', '1.0');
+foreach ([
+    SetupCommand::class,
+    ProjectsListCommand::class,
+    ProjectStatusCommand::class,
+    TranslationsUnapprovedCommand::class,
+    TranslationsApproveCommand::class,
+] as $command) {
+    /** @var Command $instance */
+    $instance = $container->get($command);
+    $app->addCommand($instance);
+}
+$app->run();
