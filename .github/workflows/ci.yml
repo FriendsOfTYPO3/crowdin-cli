@@ -1,0 +1,54 @@
+name: CI
+
+permissions: {}
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ci:
+    name: Code style, static analysis and tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2.40.0
+        with:
+          php-version: '8.5'
+          extensions: json
+          coverage: none
+          tools: composer:v2
+
+      - name: Cache composer dependencies
+        id: composer-vendor
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            bin
+            vendor
+          key: composer-${{ github.workflow }}-${{ hashFiles('composer.lock') }}
+
+      - name: Install dependencies
+        if: steps.composer-vendor.outputs.cache-hit != 'true'
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Run PHP linter
+        run: find . -type f -name '*.php' ! -path "./vendor/*" ! -path "./var/*" -print0 | xargs -0 -n1 -P4 php -l -n | (! grep -v "No syntax errors detected" )
+
+      - name: Verify PSR-4 namespace correctness
+        run: composer dumpautoload --optimize --strict-psr
+
+      - name: Code style
+        run: composer cs
+
+      - name: Static analysis
+        run: composer stan
+
+      - name: Tests
+        run: composer tests
