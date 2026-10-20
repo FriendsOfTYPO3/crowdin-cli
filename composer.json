@@ -1,5 +1,5 @@
 {
-  "name": "typo3/crowdin-cli",
+  "name": "friendsoftypo3/crowdin-cli",
   "description": "CLI for Crowdin in the context of TYPO3",
   "type": "project",
   "bin": [
@@ -12,6 +12,10 @@
       "email": "xavier@typo3.org"
     }
   ],
+  "support": {
+    "issues": "https://github.com/FriendsOfTYPO3/crowdin-cli/issues",
+    "source": "https://github.com/FriendsOfTYPO3/crowdin-cli"
+  },
   "config": {
     "bin-dir": "bin",
     "platform": {
