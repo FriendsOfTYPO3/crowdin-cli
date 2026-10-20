@@ -71,9 +71,12 @@ final class TranslationsApproveCommand extends Command
                 return Command::SUCCESS;
             }
 
-            $sources = $this->repository->findSourceTexts($projectId, array_map(static fn($t): int => $t->stringId, $pending));
-            foreach ($pending as $t) {
-                $io->writeln(sprintf('#%d [%s] %s => %s', $t->translationId, $t->authorLabel(), $sources[$t->stringId] ?? '?', $t->text), OutputInterface::VERBOSITY_VERBOSE);
+            // Source texts are fetched one by one, only do it if they are going to be displayed
+            if ($output->isVerbose()) {
+                $sources = $this->repository->findSourceTexts($projectId, array_map(static fn($t): int => $t->stringId, $pending));
+                foreach ($pending as $t) {
+                    $io->writeln(sprintf('#%d [%s] %s => %s', $t->translationId, $t->authorLabel(), $sources[$t->stringId] ?? '?', $t->text));
+                }
             }
 
             $io->writeln(sprintf('%d translation(s) in "%s" to approve.', count($pending), $language));
