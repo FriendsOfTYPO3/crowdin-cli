@@ -276,7 +276,8 @@ final class InteractiveCommand extends Command
                 }
                 if ($review->action === ReviewInput::DETAILS) {
                     foreach ($chunk as $i => $t) {
-                        $io->writeln(sprintf('%d: translation #%d (string #%d) by %s on %s%s', $i + 1, $t->translationId, $t->stringId, $t->authorLabel(), substr($t->createdAt, 0, 10), $t->pluralForm !== null ? ', plural form ' . $t->pluralForm : ''));
+                        $identifier = $sources[$t->stringId]['identifier'] ?? '';
+                        $io->writeln(sprintf('%d: %s (translation #%d) by %s on %s%s', $i + 1, $identifier !== '' ? $identifier : 'string #' . $t->stringId, $t->translationId, $t->authorLabel(), substr($t->createdAt, 0, 10), $t->pluralForm !== null ? ', plural form ' . $t->pluralForm : ''));
                     }
                     continue;
                 }
@@ -303,7 +304,7 @@ final class InteractiveCommand extends Command
 
     /**
      * @param list<PendingTranslation> $chunk
-     * @param array<int, array{text: string, fileId: int}> $sources
+     * @param array<int, array{text: string, fileId: int, identifier: string}> $sources
      * @param \Closure(PendingTranslation): string $pathOf
      */
     private function renderChunk(SymfonyStyle $io, array $chunk, array $sources, \Closure $pathOf): void

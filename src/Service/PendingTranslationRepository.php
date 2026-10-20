@@ -132,7 +132,7 @@ final readonly class PendingTranslationRepository
 
     /**
      * @param list<int> $stringIds
-     * @return array<int, array{text: string, fileId: int}> indexed by string ID
+     * @return array<int, array{text: string, fileId: int, identifier: string}> indexed by string ID
      */
     public function findSources(int $projectId, array $stringIds): array
     {
@@ -157,7 +157,7 @@ final readonly class PendingTranslationRepository
 
     /**
      * @param array<int, mixed> $remaining string IDs which are still needed, as keys. Resolved ones are removed
-     * @param array<int, array{text: string, fileId: int}> $sources
+     * @param array<int, array{text: string, fileId: int, identifier: string}> $sources
      */
     private function collectFileSources(int $projectId, int $fileId, array &$remaining, array &$sources): void
     {
@@ -178,7 +178,7 @@ final readonly class PendingTranslationRepository
     }
 
     /**
-     * @return array{text: string, fileId: int}
+     * @return array{text: string, fileId: int, identifier: string}
      */
     private function toSource(?SourceString $string): array
     {
@@ -188,6 +188,7 @@ final readonly class PendingTranslationRepository
         return [
             'text' => is_array($text) ? implode(' | ', $text) : (string)$text,
             'fileId' => $string?->getFileId() ?? 0,
+            'identifier' => (string)$string?->getIdentifier(),
         ];
     }
 

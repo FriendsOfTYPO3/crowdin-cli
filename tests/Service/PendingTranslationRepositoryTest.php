@@ -246,9 +246,10 @@ final class PendingTranslationRepositoryTest extends TestCase
         $string = $this->createMock(SourceString::class);
         $string->method('getText')->willReturn('Hello');
         $string->method('getFileId')->willReturn(42);
+        $string->method('getIdentifier')->willReturn('LGL.usergroups');
         $this->sourceString->expects(self::once())->method('get')->with(123, 1)->willReturn($string);
 
-        self::assertSame([1 => ['text' => 'Hello', 'fileId' => 42]], $this->subject->findSources(123, [1]));
+        self::assertSame([1 => ['text' => 'Hello', 'fileId' => 42, 'identifier' => 'LGL.usergroups']], $this->subject->findSources(123, [1]));
     }
 
     public function testFindSourcesLoadsWholeFileWhenManyStringsAreNeeded(): void
@@ -258,7 +259,7 @@ final class PendingTranslationRepositoryTest extends TestCase
             ->expects(self::once())
             ->method('get')
             ->with(123, 1)
-            ->willReturn(new SourceString(['id' => 1, 'text' => 'Text 1', 'fileId' => 42]));
+            ->willReturn(new SourceString(['id' => 1, 'text' => 'Text 1', 'fileId' => 42, 'identifier' => 'key1']));
         $this->sourceString
             ->expects(self::once())
             ->method('list')
@@ -273,12 +274,12 @@ final class PendingTranslationRepositoryTest extends TestCase
 
         // A full page, but everything needed was found: no further page is requested
         self::assertCount(30, $sources);
-        self::assertSame(['text' => 'Text 30', 'fileId' => 42], $sources[30]);
+        self::assertSame(['text' => 'Text 30', 'fileId' => 42, 'identifier' => 'key30'], $sources[30]);
     }
 
     public function testFindSourcesPagesThroughTheFileUntilEverythingIsFound(): void
     {
-        $this->sourceString->method('get')->willReturn(new SourceString(['id' => 1, 'text' => 'Text 1', 'fileId' => 42]));
+        $this->sourceString->method('get')->willReturn(new SourceString(['id' => 1, 'text' => 'Text 1', 'fileId' => 42, 'identifier' => 'key1']));
         $offsets = [];
         $this->sourceString
             ->expects(self::exactly(2))
@@ -300,7 +301,7 @@ final class PendingTranslationRepositoryTest extends TestCase
     {
         $collection = new ModelCollection();
         for ($id = $from; $id <= $to; $id++) {
-            $collection->add(new SourceString(['id' => $id, 'text' => 'Text ' . $id, 'fileId' => 42]));
+            $collection->add(new SourceString(['id' => $id, 'text' => 'Text ' . $id, 'fileId' => 42, 'identifier' => 'key' . $id]));
         }
 
         return $collection;
