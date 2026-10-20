@@ -77,9 +77,12 @@ translations per user follows the list.
 | Option                  | Description                                              |
 |-------------------------|----------------------------------------------------------|
 | `-u`, `--user=USERNAME` | Only show suggestions of this username (or numeric user ID). |
+| `-p`, `--path=PREFIX`   | Only show translations of files whose path in Crowdin *starts with* this value. |
 | `-l`, `--limit=N`       | Maximum number of translations displayed (default: 100). |
 
 The language is the Crowdin language ID, as shown by `project:status` (for example `de`, `fr`, `es-ES`).
+The path filter matches the beginning of the file path as shown in the section headings of the output, for example
+`--path=/14.3/typo3/sysext/backend` (a leading slash is optional). Filters can be combined, e.g. `--user` and `--path`.
 Source texts are fetched one by one, so large limits take a while.
 
 ### Approve translations
@@ -99,12 +102,13 @@ Approve everything a given user suggested in one language:
 | Option         | Description                                                                 |
 |----------------|-----------------------------------------------------------------------------|
 | `-u`, `--user` | Approve all unapproved translations suggested by this username (or user ID). |
+| `-p`, `--path` | Approve all unapproved translations of files whose path starts with this value.  |
 | `--dry-run`    | Only count what would be approved, nothing is changed.                      |
 | `-y`, `--yes`  | Do not ask for confirmation.                                                |
 | `-v`           | List every translation that is about to be approved.                        |
 
 Only translations that are currently unapproved in the given language are touched; other IDs are skipped with a
-warning. Combining IDs and `--user` approves only the given translations that were suggested by that user.
+warning. Combining IDs with `--user` and/or `--path` approves only the given translations matching these filters.
 
 Recommended workflow for bulk approval:
 
@@ -113,6 +117,26 @@ Recommended workflow for bulk approval:
 ./crowdin-cli translations:approve 368815 de --user=jdoe --dry-run -v   # check what would be approved
 ./crowdin-cli translations:approve 368815 de --user=jdoe          # approve (asks for confirmation)
 ```
+
+Approve everything below a given path, optionally restricted to a user:
+
+```bash
+./crowdin-cli translations:approve 368815 de --path=/14.3/typo3/sysext/backend --dry-run
+./crowdin-cli translations:approve 368815 de --path=/14.3/typo3/sysext/backend --user=jdoe
+```
+
+## Glossary suggestions
+
+In the Crowdin web interface, the pending approvals of a language may list a "Glossary" entry next to your source
+files. This tool does **not** list or approve those:
+
+- Glossary terms are not translations of source strings. They live in a glossary, which is a separate resource that
+  is attached to projects, not in the project's source files.
+- `translations:unapproved` and `translations:approve` only work on string translations of the project files.
+- In the Crowdin API, a glossary term has a `status` (such as preferred or admitted), but this is the usage status of
+  the term, not a review state, and glossary terms cannot be filtered by pending approval. Terms and concepts only
+  expose their author and creation date, so there is no reliable way to tell a suggestion from an accepted term.
+  Suggested glossary translations therefore have to be reviewed in the Crowdin web interface.
 
 ## Development
 

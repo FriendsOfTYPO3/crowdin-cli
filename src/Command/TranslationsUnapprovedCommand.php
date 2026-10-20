@@ -29,6 +29,7 @@ final class TranslationsUnapprovedCommand extends Command
             ->addArgument('project', InputArgument::REQUIRED, 'Crowdin project ID')
             ->addArgument('language', InputArgument::REQUIRED, 'Language ID, e.g. "de"')
             ->addOption('user', 'u', InputOption::VALUE_REQUIRED, 'Only show suggestions of this username (or user ID)')
+            ->addOption('path', 'p', InputOption::VALUE_REQUIRED, 'Only show translations of files whose path starts with this value, e.g. "/14.3/typo3/sysext/backend"')
             ->addOption('limit', 'l', InputOption::VALUE_REQUIRED, 'Maximum number of translations to display', '100');
     }
 
@@ -41,6 +42,8 @@ final class TranslationsUnapprovedCommand extends Command
         $language = $input->getArgument('language');
         /** @var string|null $user */
         $user = $input->getOption('user');
+        /** @var string|null $path */
+        $path = $input->getOption('path');
         /** @var numeric-string $limitOption */
         $limitOption = $input->getOption('limit');
         $projectId = (int)$project;
@@ -50,7 +53,8 @@ final class TranslationsUnapprovedCommand extends Command
             $pending = $this->repository->findUnapproved(
                 $projectId,
                 $language,
-                $user
+                $user,
+                $path
             );
             $all = $pending;
             $total = count($pending);
@@ -74,8 +78,8 @@ final class TranslationsUnapprovedCommand extends Command
         }
         ksort($byFile);
 
-        foreach ($byFile as $path => $translations) {
-            $io->section(sprintf('%s (%d)', $path, count($translations)));
+        foreach ($byFile as $filePath => $translations) {
+            $io->section(sprintf('%s (%d)', $filePath, count($translations)));
             $rows = [];
             foreach ($translations as $i => $t) {
                 if ($i > 0) {

@@ -97,6 +97,39 @@ final class PendingTranslationRepositoryTest extends TestCase
         self::assertSame([11, 13], array_map(static fn($t): int => $t->translationId, $result));
     }
 
+    public function testFindUnapprovedFiltersByPathPrefix(): void
+    {
+        $fileApi = $this->createMock(FileApi::class);
+        $fileApi->expects(self::once())->method('list')->with(123, ['limit' => 500, 'offset' => 0])->willReturnCallback(function (): ModelCollection {
+            $collection = new ModelCollection();
+            foreach ([1 => '/14.3/typo3/sysext/backend/de.xlf', 2 => '/14.3/typo3/sysext/core/de.xlf', 3 => '/14.3/typo3/sysext/backend/other.xlf'] as $id => $path) {
+                $collection->add(new File(['id' => $id, 'path' => $path]));
+            }
+
+            return $collection;
+        });
+        $crowdin = $this->createMock(Crowdin::class);
+        $crowdin->method('__get')->willReturnMap([
+            ['stringTranslation', $this->stringTranslation],
+            ['file', $fileApi],
+        ]);
+
+        $fileIds = [];
+        $this->stringTranslation
+            ->expects(self::exactly(2))
+            ->method('listLanguageTranslations')
+            ->willReturnCallback(function (int $projectId, string $languageId, array $params) use (&$fileIds): ModelCollection {
+                $fileIds[] = $params['fileId'];
+
+                return self::collection([self::languageTranslation($params['fileId'], $params['fileId'] * 10, 'alice')]);
+            });
+
+        $result = (new PendingTranslationRepository($crowdin))->findUnapproved(123, 'de', null, '14.3/typo3/sysext/backend');
+
+        self::assertSame([1, 3], $fileIds);
+        self::assertSame([10, 30], array_map(static fn($t): int => $t->translationId, $result));
+    }
+
     public function testFindUnapprovedSkipsEntriesWithoutTranslationId(): void
     {
         $this->stringTranslation->method('listLanguageTranslations')->willReturn(self::collection([

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace TYPO3\CrowdinCli\Service;
 
 use CrowdinApiClient\Crowdin;
+use CrowdinApiClient\Model\File;
 use CrowdinApiClient\Model\LanguageTranslation;
 use TYPO3\CrowdinCli\Entity\PendingTranslation;
 
@@ -22,32 +23,64 @@ final readonly class PendingTranslationRepository
     /**
      * Translations of the given language which have no approval yet.
      *
+     * @param string|null $pathPrefix only translations of files whose path in Crowdin starts with this value
      * @return list<PendingTranslation>
      */
-    public function findUnapproved(int $projectId, string $languageId, ?string $user = null): array
+    public function findUnapproved(int $projectId, string $languageId, ?string $user = null, ?string $pathPrefix = null): array
     {
         $pending = [];
+        $fileIds = $pathPrefix === null ? [null] : $this->findFileIdsByPathPrefix($projectId, $pathPrefix);
+        foreach ($fileIds as $fileId) {
+            $offset = 0;
+            do {
+                $params = [
+                    'croql' => 'count of approvals = 0',
+                    'limit' => self::LIMIT,
+                    'offset' => $offset,
+                ];
+                if ($fileId !== null) {
+                    $params['fileId'] = $fileId;
+                }
+                $items = $this->crowdin->stringTranslation->listLanguageTranslations($projectId, $languageId, $params);
+                $count = 0;
+                /** @var LanguageTranslation $item */
+                foreach ($items as $item) {
+                    $count++;
+                    foreach ($this->toPending($item) as $translation) {
+                        if ($user === null || $translation->isSuggestedBy($user)) {
+                            $pending[] = $translation;
+                        }
+                    }
+                }
+                $offset += self::LIMIT;
+            } while ($count === self::LIMIT);
+        }
+
+        return $pending;
+    }
+
+    /**
+     * @return list<int> IDs of the files whose path starts with the given prefix
+     */
+    private function findFileIdsByPathPrefix(int $projectId, string $pathPrefix): array
+    {
+        $pathPrefix = '/' . ltrim($pathPrefix, '/');
+        $fileIds = [];
         $offset = 0;
         do {
-            $items = $this->crowdin->stringTranslation->listLanguageTranslations($projectId, $languageId, [
-                'croql' => 'count of approvals = 0',
-                'limit' => self::LIMIT,
-                'offset' => $offset,
-            ]);
+            $files = $this->crowdin->file->list($projectId, ['limit' => self::LIMIT, 'offset' => $offset]);
             $count = 0;
-            /** @var LanguageTranslation $item */
-            foreach ($items as $item) {
+            /** @var File $file */
+            foreach ($files as $file) {
                 $count++;
-                foreach ($this->toPending($item) as $translation) {
-                    if ($user === null || $translation->isSuggestedBy($user)) {
-                        $pending[] = $translation;
-                    }
+                if (str_starts_with($file->getPath(), $pathPrefix)) {
+                    $fileIds[] = $file->getId();
                 }
             }
             $offset += self::LIMIT;
         } while ($count === self::LIMIT);
 
-        return $pending;
+        return $fileIds;
     }
 
     /**
