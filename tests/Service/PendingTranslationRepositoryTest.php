@@ -11,6 +11,7 @@ use CrowdinApiClient\Crowdin;
 use CrowdinApiClient\Model\File;
 use CrowdinApiClient\Model\LanguageTranslation;
 use CrowdinApiClient\Model\SourceString;
+use CrowdinApiClient\Model\StringTranslationApproval;
 use CrowdinApiClient\ModelCollection;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -82,6 +83,21 @@ final class PendingTranslationRepositoryTest extends TestCase
         self::assertSame('Text 1', $result[0]->text);
         self::assertSame('alice', $result[0]->username);
         self::assertSame('ALICE (alice)', $result[0]->authorLabel());
+    }
+
+    public function testFindUnapprovedDropsDuplicatedTranslations(): void
+    {
+        $this->stringTranslation
+            ->method('listLanguageTranslations')
+            ->willReturn(self::collection([
+                self::languageTranslation(1, 11, 'alice'),
+                self::languageTranslation(2, 12, 'bob'),
+                self::languageTranslation(1, 11, 'alice'),
+            ]));
+
+        $result = $this->subject->findUnapproved(123, 'de');
+
+        self::assertSame([11, 12], array_map(static fn($t): int => $t->translationId, $result));
     }
 
     public function testFindUnapprovedFiltersByUser(): void
@@ -307,13 +323,24 @@ final class PendingTranslationRepositoryTest extends TestCase
         self::assertSame([42 => '/typo3/core/de.xlf'], $paths);
     }
 
-    public function testApproveCreatesApproval(): void
+    public function testApproveCreatesApprovalAndReturnsItsId(): void
     {
         $this->stringTranslation
             ->expects(self::once())
             ->method('createApproval')
-            ->with(123, ['translationId' => 456]);
+            ->with(123, ['translationId' => 456])
+            ->willReturn(new StringTranslationApproval(['id' => 789, 'translationId' => 456]));
 
-        $this->subject->approve(123, 456);
+        self::assertSame(789, $this->subject->approve(123, 456));
+    }
+
+    public function testRevokeApprovalDeletesApproval(): void
+    {
+        $this->stringTranslation
+            ->expects(self::once())
+            ->method('deleteApproval')
+            ->with(123, 789);
+
+        $this->subject->revokeApproval(123, 789);
     }
 }

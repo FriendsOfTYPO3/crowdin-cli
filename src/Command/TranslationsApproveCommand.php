@@ -11,6 +11,7 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
+use TYPO3\CrowdinCli\Service\ApprovalLog;
 use TYPO3\CrowdinCli\Service\PendingTranslationRepository;
 
 #[AsCommand(name: 'translations:approve', description: 'Approve translations by ID, or all unapproved translations of a user and/or of a file path')]
@@ -18,6 +19,7 @@ final class TranslationsApproveCommand extends Command
 {
     public function __construct(
         private readonly PendingTranslationRepository $repository,
+        private readonly ApprovalLog $approvalLog,
     ) {
         parent::__construct();
     }
@@ -89,10 +91,12 @@ final class TranslationsApproveCommand extends Command
             }
 
             $failed = 0;
+            $sessionId = ApprovalLog::newSessionId();
             $io->progressStart(count($pending));
             foreach ($pending as $t) {
                 try {
-                    $this->repository->approve($projectId, $t->translationId);
+                    $approvalId = $this->repository->approve($projectId, $t->translationId);
+                    $this->approvalLog->record($sessionId, $projectId, $language, $t->translationId, $approvalId);
                 } catch (\Throwable $e) {
                     $failed++;
                     $io->warning(sprintf('Translation %d: %s', $t->translationId, $e->getMessage()));
@@ -109,7 +113,7 @@ final class TranslationsApproveCommand extends Command
             $io->error(sprintf('%d approval(s) failed.', $failed));
             return Command::FAILURE;
         }
-        $io->success('Done.');
+        $io->success('Done. Use "translations:undo" to revoke these approvals.');
 
         return Command::SUCCESS;
     }

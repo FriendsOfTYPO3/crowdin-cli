@@ -7,10 +7,13 @@ use DI\ContainerBuilder;
 use FriendsOfTYPO3\CrowdinBase\Command\SetupCommand;
 use Symfony\Component\Console\Application;
 use Symfony\Component\Console\Command\Command;
+use TYPO3\CrowdinCli\Command\InteractiveCommand;
 use TYPO3\CrowdinCli\Command\ProjectsListCommand;
 use TYPO3\CrowdinCli\Command\ProjectStatusCommand;
 use TYPO3\CrowdinCli\Command\TranslationsApproveCommand;
+use TYPO3\CrowdinCli\Command\TranslationsUndoCommand;
 use TYPO3\CrowdinCli\Command\TranslationsUnapprovedCommand;
+use TYPO3\CrowdinCli\Service\ApprovalLog;
 
 // vendor libraries still call functions deprecated in PHP 8.5
 error_reporting(E_ALL & ~E_DEPRECATED);
@@ -21,6 +24,10 @@ require __DIR__ . '/vendor/autoload.php';
 $basePath = \Composer\InstalledVersions::getInstallPath('friendsoftypo3/crowdin-base');
 $containerBuilder = new ContainerBuilder();
 $containerBuilder->addDefinitions($basePath . '/config/container.php');
+// Approvals made by this tool are logged here, to be able to revoke them
+$containerBuilder->addDefinitions([
+    ApprovalLog::class => \DI\autowire()->constructorParameter('file', __DIR__ . '/var/approvals.log'),
+]);
 $container = $containerBuilder->build();
 
 $app = new Application('Crowdin-CLI', '1.0');
@@ -30,6 +37,8 @@ foreach ([
     ProjectStatusCommand::class,
     TranslationsUnapprovedCommand::class,
     TranslationsApproveCommand::class,
+    TranslationsUndoCommand::class,
+    InteractiveCommand::class,
 ] as $command) {
     /** @var Command $instance */
     $instance = $container->get($command);

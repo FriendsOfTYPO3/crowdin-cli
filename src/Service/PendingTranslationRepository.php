@@ -59,13 +59,17 @@ final readonly class PendingTranslationRepository
             }
         }
 
+        // Crowdin may return the same translation more than once (it did, across pages): keep the first one
         foreach ($translations as $translation) {
+            if (isset($pending[$translation->translationId])) {
+                continue;
+            }
             if ($user === null || $translation->isSuggestedBy($user)) {
-                $pending[] = $translation;
+                $pending[$translation->translationId] = $translation;
             }
         }
 
-        return $pending;
+        return array_values($pending);
     }
 
     /**
@@ -201,9 +205,22 @@ final readonly class PendingTranslationRepository
         return $paths;
     }
 
-    public function approve(int $projectId, int $translationId): void
+    /**
+     * @return int ID of the created approval (needed to revoke it)
+     */
+    public function approve(int $projectId, int $translationId): int
     {
-        $this->crowdin->stringTranslation->createApproval($projectId, ['translationId' => $translationId]);
+        $approval = $this->crowdin->stringTranslation->createApproval($projectId, ['translationId' => $translationId]);
+        if ($approval === null) {
+            throw new \RuntimeException('Crowdin returned no approval.');
+        }
+
+        return $approval->getId();
+    }
+
+    public function revokeApproval(int $projectId, int $approvalId): void
+    {
+        $this->crowdin->stringTranslation->deleteApproval($projectId, $approvalId);
     }
 
     /**
