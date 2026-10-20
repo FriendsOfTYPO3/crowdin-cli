@@ -7,6 +7,7 @@ namespace TYPO3\CrowdinCli\Service;
 use CrowdinApiClient\Crowdin;
 use CrowdinApiClient\Model\File;
 use CrowdinApiClient\Model\LanguageTranslation;
+use CrowdinApiClient\Model\SourceString;
 use TYPO3\CrowdinCli\Entity\PendingTranslation;
 
 /**
@@ -15,6 +16,9 @@ use TYPO3\CrowdinCli\Entity\PendingTranslation;
 final readonly class PendingTranslationRepository
 {
     private const int LIMIT = 500;
+
+    /** Number of still needed strings from which loading a whole file is cheaper than one request per string */
+    private const int BULK_THRESHOLD = 20;
 
     public function __construct(
         private Crowdin $crowdin,
@@ -128,19 +132,59 @@ final readonly class PendingTranslationRepository
      */
     public function findSources(int $projectId, array $stringIds): array
     {
-        // The strings list endpoint cannot filter by IDs, so fetch them one by one
+        // The strings list endpoint cannot filter by IDs, only by file. Look up one string to learn its file and, if many
+        // other strings are still needed, load the strings of that whole file page by page instead of one by one.
         $sources = [];
-        foreach (array_unique($stringIds) as $stringId) {
+        $remaining = array_flip(array_unique($stringIds));
+        while ($remaining !== []) {
+            $stringId = array_key_first($remaining);
             $string = $this->crowdin->sourceString->get($projectId, $stringId);
-            /** @var string|list<string>|null $text */
-            $text = $string?->getText();
-            $sources[$stringId] = [
-                'text' => is_array($text) ? implode(' | ', $text) : (string)$text,
-                'fileId' => $string?->getFileId() ?? 0,
-            ];
+            $sources[$stringId] = $this->toSource($string);
+            unset($remaining[$stringId]);
+
+            $fileId = $string?->getFileId();
+            if ($fileId !== null && count($remaining) >= self::BULK_THRESHOLD) {
+                $this->collectFileSources($projectId, $fileId, $remaining, $sources);
+            }
         }
 
         return $sources;
+    }
+
+    /**
+     * @param array<int, mixed> $remaining string IDs which are still needed, as keys. Resolved ones are removed
+     * @param array<int, array{text: string, fileId: int}> $sources
+     */
+    private function collectFileSources(int $projectId, int $fileId, array &$remaining, array &$sources): void
+    {
+        $offset = 0;
+        do {
+            $strings = $this->crowdin->sourceString->list($projectId, ['fileId' => $fileId, 'limit' => self::LIMIT, 'offset' => $offset]);
+            $count = 0;
+            /** @var SourceString $string */
+            foreach ($strings as $string) {
+                $count++;
+                if (isset($remaining[$string->getId()])) {
+                    $sources[$string->getId()] = $this->toSource($string);
+                    unset($remaining[$string->getId()]);
+                }
+            }
+            $offset += self::LIMIT;
+        } while ($count === self::LIMIT && $remaining !== []);
+    }
+
+    /**
+     * @return array{text: string, fileId: int}
+     */
+    private function toSource(?SourceString $string): array
+    {
+        /** @var string|list<string>|null $text */
+        $text = $string?->getText();
+
+        return [
+            'text' => is_array($text) ? implode(' | ', $text) : (string)$text,
+            'fileId' => $string?->getFileId() ?? 0,
+        ];
     }
 
     /**

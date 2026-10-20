@@ -235,6 +235,61 @@ final class PendingTranslationRepositoryTest extends TestCase
         self::assertSame([1 => ['text' => 'Hello', 'fileId' => 42]], $this->subject->findSources(123, [1]));
     }
 
+    public function testFindSourcesLoadsWholeFileWhenManyStringsAreNeeded(): void
+    {
+        $stringIds = range(1, 30);
+        $this->sourceString
+            ->expects(self::once())
+            ->method('get')
+            ->with(123, 1)
+            ->willReturn(new SourceString(['id' => 1, 'text' => 'Text 1', 'fileId' => 42]));
+        $this->sourceString
+            ->expects(self::once())
+            ->method('list')
+            ->willReturnCallback(function (int $projectId, array $params): ModelCollection {
+                self::assertSame(42, $params['fileId']);
+                self::assertSame(0, $params['offset']);
+
+                return self::stringCollection(1, 500);
+            });
+
+        $sources = $this->subject->findSources(123, $stringIds);
+
+        // A full page, but everything needed was found: no further page is requested
+        self::assertCount(30, $sources);
+        self::assertSame(['text' => 'Text 30', 'fileId' => 42], $sources[30]);
+    }
+
+    public function testFindSourcesPagesThroughTheFileUntilEverythingIsFound(): void
+    {
+        $this->sourceString->method('get')->willReturn(new SourceString(['id' => 1, 'text' => 'Text 1', 'fileId' => 42]));
+        $offsets = [];
+        $this->sourceString
+            ->expects(self::exactly(2))
+            ->method('list')
+            ->willReturnCallback(function (int $projectId, array $params) use (&$offsets): ModelCollection {
+                $offsets[] = $params['offset'];
+
+                return $params['offset'] === 0 ? self::stringCollection(1, 500) : self::stringCollection(501, 520);
+            });
+
+        $sources = $this->subject->findSources(123, [...range(1, 25), 510]);
+
+        self::assertSame([0, 500], $offsets);
+        self::assertSame('Text 510', $sources[510]['text']);
+        self::assertCount(26, $sources);
+    }
+
+    private static function stringCollection(int $from, int $to): ModelCollection
+    {
+        $collection = new ModelCollection();
+        for ($id = $from; $id <= $to; $id++) {
+            $collection->add(new SourceString(['id' => $id, 'text' => 'Text ' . $id, 'fileId' => 42]));
+        }
+
+        return $collection;
+    }
+
     public function testFindFilePathsFetchesEachFileOnce(): void
     {
         $fileApi = $this->createMock(FileApi::class);
