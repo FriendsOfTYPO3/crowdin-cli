@@ -78,10 +78,8 @@ final readonly class ProofreaderRepository
                 $response = $this->crowdin->apiRequest('get', sprintf('projects/%d/members', $projectId), null, [
                     'params' => ['limit' => self::PAGE_SIZE, 'offset' => $offset],
                 ]);
-            } catch (BadResponseException $e) {
-                throw new \RuntimeException($this->describeFailure($e->getResponse()->getStatusCode(), $projectId), 0, $e);
-            } catch (ApiException $e) {
-                throw new \RuntimeException($this->describeFailure($e->getCode(), $projectId, $e->getMessage()), 0, $e);
+            } catch (BadResponseException | ApiException $e) {
+                throw ApiFailure::describe($e, 'the project members', $projectId);
             }
 
             $items = $response['data'] ?? [];
@@ -90,18 +88,6 @@ final readonly class ProofreaderRepository
             }
             $offset += self::PAGE_SIZE;
         } while (count($items) === self::PAGE_SIZE);
-    }
-
-    private function describeFailure(int $status, int $projectId, ?string $apiMessage = null): string
-    {
-        return match ($status) {
-            401 => 'Crowdin rejected the access token (401). Check CROWDIN_ACCESS_TOKEN.',
-            403 => 'Crowdin denied access to the project members (403). The token needs a scope that allows reading project members '
-                . '(see the README), and its owner must be a manager of the project.',
-            404 => sprintf('Project %d not found, or its members are not visible to this token (404).', $projectId),
-            429 => 'Crowdin rate limit reached (429), try again in a moment.',
-            default => sprintf('Crowdin could not list the members (HTTP %d%s).', $status, $apiMessage !== null ? ': ' . $apiMessage : ''),
-        };
     }
 
     /**

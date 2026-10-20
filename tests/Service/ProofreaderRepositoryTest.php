@@ -109,7 +109,7 @@ final class ProofreaderRepositoryTest extends TestCase
     {
         yield 'unauthorized' => [401, 'rejected the access token'];
         yield 'missing scope' => [403, 'needs a scope'];
-        yield 'unknown project' => [404, 'Project 123 not found'];
+        yield 'unknown project' => [404, 'Not found (404): project 123'];
         yield 'rate limit' => [429, 'rate limit'];
         yield 'other' => [418, 'HTTP 418'];
     }

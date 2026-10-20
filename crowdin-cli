@@ -8,6 +8,7 @@ use FriendsOfTYPO3\CrowdinBase\Command\SetupCommand;
 use Symfony\Component\Console\Application;
 use Symfony\Component\Console\Command\Command;
 use TYPO3\CrowdinCli\Command\InteractiveCommand;
+use TYPO3\CrowdinCli\Command\ProjectContributorsCommand;
 use TYPO3\CrowdinCli\Command\ProjectProofreadersCommand;
 use TYPO3\CrowdinCli\Command\ProjectsListCommand;
 use TYPO3\CrowdinCli\Command\ProjectStatusCommand;
@@ -37,6 +38,7 @@ foreach ([
     ProjectsListCommand::class,
     ProjectStatusCommand::class,
     ProjectProofreadersCommand::class,
+    ProjectContributorsCommand::class,
     TranslationsUnapprovedCommand::class,
     TranslationsApproveCommand::class,
     TranslationsUndoCommand::class,

@@ -81,6 +81,39 @@ scopes, the Crowdin documentation does not state it in a form we could verify) a
 the project. Without it, the command stops with a message mentioning HTTP 401 (invalid token), 403 (missing scope or
 role) or 404 (unknown project) instead of a table.
 
+### Contributors of a project in a language
+
+```bash
+./crowdin-cli project:contributors 368815 fr
+./crowdin-cli project:contributors 368815 fr --by=approved --from=2026-01-01 --limit=50
+```
+
+Ranks the members who contributed to a project in one language. Both the project and the language are required: the
+data comes from the "Top Members" report of Crowdin, which Crowdin generates on request for one project and language
+(a few API calls and a few seconds each time), so there is no overview of all languages at once.
+
+| Column      | Description                                                                          |
+|-------------|--------------------------------------------------------------------------------------|
+| Rank        | Position, contributors with the same figures share their rank.                       |
+| Translated  | Translations (or suggestions) the member made.                                       |
+| Approved    | Translations the member approved (as proofreader), not the approvals they received.  |
+| Votes       | Votes the member cast on translations of others.                                     |
+
+| Option                | Description                                                                          |
+|-----------------------|--------------------------------------------------------------------------------------|
+| `-b`, `--by=VALUE`    | Rank by `translated` (default) or `approved`.                                        |
+| `--unit=VALUE`        | Count `strings` (default), `words`, `chars` or `chars_with_spaces`.                  |
+| `--from=YYYY-MM-DD`   | Only count contributions as of this date (UTC). By default, since the project exists. |
+| `--to=YYYY-MM-DD`     | Only count contributions until the end of this day (UTC).                            |
+| `-l`, `--limit=N`     | Maximum number of contributors displayed (default: 20), `0` for all.                  |
+
+Members without any activity are left out. Note that automated accounts, such as the `TYPO3` account which imports
+translations in bulk, rank like anyone else.
+
+Like `project:proofreaders`, this needs a token allowed to generate project reports (most likely the *Reports* scope, to
+be verified in the Crowdin documentation) and the manager role in the project. Errors such as 401, 403 and 404 are
+reported with a message instead of a ranking.
+
 ### Guided review (interactive)
 
 `interactive` (alias `review`) walks through the whole review workflow with questions, instead of you chaining the
