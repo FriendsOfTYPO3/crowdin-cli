@@ -18,4 +18,16 @@ final class LanguageProgressTest extends TestCase
     {
         self::assertSame(0, (new LanguageProgress('fr', 50, 60))->pending());
     }
+
+    public function testHasPendingUsesExactStringCountWhenKnown(): void
+    {
+        self::assertTrue((new LanguageProgress('de', 99, 99, 4))->hasPending());
+        self::assertFalse((new LanguageProgress('de', 99, 99, 0))->hasPending());
+    }
+
+    public function testHasPendingFallsBackToPercentages(): void
+    {
+        self::assertTrue((new LanguageProgress('de', 80, 65))->hasPending());
+        self::assertFalse((new LanguageProgress('de', 99, 99))->hasPending());
+    }
 }

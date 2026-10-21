@@ -154,9 +154,9 @@ final class InteractiveCommand extends Command
             );
 
             // Percentages are rounded: a language showing 0 % may still hold a few pending translations
-            $candidates = array_values(array_filter($progress, static fn(LanguageProgress $p): bool => $p->pending() > 0));
+            $candidates = array_values(array_filter($progress, static fn(LanguageProgress $p): bool => $p->hasPending()));
             if ($candidates === []) {
-                $io->success('No translation waits for approval (the percentages are rounded, use translations:unapproved to be sure).');
+                $io->success('No translation waits for approval.');
                 return;
             }
 

@@ -34,7 +34,9 @@ final readonly class ProjectProgressRepository
             if ($languageId !== null && strcasecmp($item->getLanguageId(), $languageId) !== 0) {
                 continue;
             }
-            $result[] = new LanguageProgress($item->getLanguageId(), $item->getTranslationProgress(), $item->getApprovalProgress());
+            $phrases = $item->getPhrases();
+            $pendingStrings = isset($phrases['translated'], $phrases['approved']) ? max(0, (int)$phrases['translated'] - (int)$phrases['approved']) : null;
+            $result[] = new LanguageProgress($item->getLanguageId(), $item->getTranslationProgress(), $item->getApprovalProgress(), $pendingStrings);
         }
         usort($result, static fn(LanguageProgress $a, LanguageProgress $b): int => $a->languageId <=> $b->languageId);
 
