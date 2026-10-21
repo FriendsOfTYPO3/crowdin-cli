@@ -125,7 +125,7 @@ final class TranslationsApproveCommand extends Command
             }
 
             $languageName = $this->repository->findLanguageName($language);
-            $io->writeln(sprintf('%d translation(s) in "%s"%s to approve%s.', count($pending), $language, $languageName !== null ? sprintf(' (%s)', $languageName) : '',$rivalCount > 0 ? sprintf(', %d competing suggestion(s) to delete', $rivalCount) : ''));
+            $io->writeln(sprintf('%d translation(s) in "%s"%s to approve%s.', count($pending), $language, $languageName !== null ? sprintf(' (%s)', $languageName) : '', $rivalCount > 0 ? sprintf(', %d competing suggestion(s) to delete', $rivalCount) : ''));
             if ($input->getOption('dry-run')) {
                 $io->note('Dry run, nothing approved. Use -v to see the translations.');
                 return Command::SUCCESS;
