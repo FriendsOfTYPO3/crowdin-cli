@@ -14,6 +14,7 @@ It builds upon [`friendsoftypo3/crowdin-base`](https://github.com/FriendsOfTYPO3
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Usage](#usage)
+  - [JSON output for scripts](#json-output-for-scripts)
   - [Guided review (interactive)](#guided-review-interactive)
   - [List projects](#list-projects)
   - [Translation status of a project](#translation-status-of-a-project)
@@ -65,6 +66,22 @@ Run it again whenever projects are added or languages change (or use `./crowdin-
 
 All commands are run with `./crowdin-cli <command>` (in DDEV: `ddev exec ./crowdin-cli <command>`). Use `./crowdin-cli list` to see them and
 `./crowdin-cli <command> --help` for all options.
+
+### JSON output for scripts
+
+Every command except `interactive` accepts `--format=json`, to get one JSON document on stdout instead of tables:
+
+```bash
+./crowdin-cli project:status 368815 --format=json | jq '.languages[] | select(.approved < 100)'
+./crowdin-cli translations:approve 368815 fr --user=jdoe --yes --format=json
+```
+
+- Progress and notes go to stderr, so stdout can be piped as is. Warnings are returned in a `warnings` key.
+- On failure the exit code is not 0 and the document is `{"error": {"message": "..."}}`.
+- A command cannot ask for confirmation in this mode: `translations:approve`, `translations:undo` and
+  `translations:upload` require `--yes` (or `--dry-run`, for the ones which have it).
+- `translations:approve` and `translations:upload` list what happened to every translation or file (`status`:
+  `approved`, `uploaded`, `failed`, ...), also with `--dry-run`, where the status is `pending`.
 
 ### Guided review (interactive)
 

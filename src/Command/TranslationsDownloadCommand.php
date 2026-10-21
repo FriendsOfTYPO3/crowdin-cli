@@ -10,7 +10,7 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Console\Style\SymfonyStyle;
+use TYPO3\CrowdinCli\Service\CommandOutput;
 use TYPO3\CrowdinCli\Service\ProjectResolver;
 use TYPO3\CrowdinCli\Service\TranslationDownloader;
 
@@ -31,11 +31,13 @@ final class TranslationsDownloadCommand extends Command
             ->addArgument('language', InputArgument::REQUIRED, 'Crowdin language ID, e.g. "fr"')
             ->addOption('output-dir', 'o', InputOption::VALUE_REQUIRED, 'Directory to extract the files to (default: "<project identifier>-<language>" in the current directory)')
             ->addOption('approved-only', null, InputOption::VALUE_NONE, 'Only export approved translations');
+        CommandOutput::addOption($this);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
+        $out = new CommandOutput($input, $output);
+        $io = $out->io;
         /** @var string $project */
         $project = $input->getArgument('project');
         /** @var string $language */
@@ -50,8 +52,18 @@ final class TranslationsDownloadCommand extends Command
             $io->writeln(sprintf('Building the "%s" translations of %s, this may take a moment...', $language, $resolved->identifier));
             $files = $this->downloader->download($resolved->id, $language, $directory, (bool)$input->getOption('approved-only'));
         } catch (\Throwable $e) {
-            $io->error($e->getMessage());
-            return Command::FAILURE;
+            return $out->fail($e->getMessage());
+        }
+
+        $out->emit([
+            'project' => $resolved->id,
+            'identifier' => $resolved->identifier,
+            'language' => $language,
+            'directory' => $directory,
+            'files' => $files,
+        ]);
+        if ($out->json) {
+            return Command::SUCCESS;
         }
 
         if ($files === []) {
@@ -59,7 +71,7 @@ final class TranslationsDownloadCommand extends Command
             return Command::SUCCESS;
         }
 
-        if ($output->isVerbose()) {
+        if ($io->isVerbose()) {
             $io->listing($files);
         }
         $io->success(sprintf('%d file(s) extracted to %s', count($files), $directory));

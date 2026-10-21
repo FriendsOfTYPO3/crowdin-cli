@@ -10,8 +10,8 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Console\Style\SymfonyStyle;
 use TYPO3\CrowdinCli\Entity\UploadCandidate;
+use TYPO3\CrowdinCli\Service\CommandOutput;
 use TYPO3\CrowdinCli\Service\ProjectResolver;
 use TYPO3\CrowdinCli\Service\TranslationUploader;
 
@@ -35,12 +35,14 @@ final class TranslationsUploadCommand extends Command
             ->addOption('auto-approve', null, InputOption::VALUE_NONE, 'Approve the uploaded translations instead of suggesting them')
             ->addOption('allow-same-as-source', null, InputOption::VALUE_NONE, 'Also upload translations identical to their source text, which are skipped by default')
             ->addOption('dry-run', null, InputOption::VALUE_NONE, 'Only show what would be uploaded, nothing is sent')
-            ->addOption('yes', 'y', InputOption::VALUE_NONE, 'Do not ask for confirmation');
+            ->addOption('yes', 'y', InputOption::VALUE_NONE, 'Do not ask for confirmation (required with --format=json, unless --dry-run)');
+        CommandOutput::addOption($this);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
+        $out = new CommandOutput($input, $output);
+        $io = $out->io;
         /** @var string $project */
         $project = $input->getArgument('project');
         /** @var string $language */
@@ -51,12 +53,18 @@ final class TranslationsUploadCommand extends Command
         $path = $input->getOption('path');
         $autoApprove = (bool)$input->getOption('auto-approve');
         $allowSame = (bool)$input->getOption('allow-same-as-source');
+        $dryRun = (bool)$input->getOption('dry-run');
+
+        if ($out->json && !$input->getOption('yes') && !$dryRun) {
+            return $out->fail('--format=json cannot ask for confirmation: add --yes to upload, or --dry-run.', Command::INVALID);
+        }
 
         try {
             $resolved = $this->resolver->resolve($project);
             $localFiles = $this->uploader->findLocalFiles($directory, $path);
             if ($localFiles === []) {
                 $io->warning('No file found in the directory' . ($path === null ? '.' : sprintf(' below "%s".', $path)));
+                $out->emit($this->report($resolved->id, $language, $dryRun, $autoApprove, [], []));
                 return Command::SUCCESS;
             }
 
@@ -69,14 +77,14 @@ final class TranslationsUploadCommand extends Command
                 $io->writeln($this->describe($candidate));
             }
         } catch (\Throwable $e) {
-            $io->error($e->getMessage());
-            return Command::FAILURE;
+            return $out->fail($e->getMessage());
         }
 
         $uploadable = array_values(array_filter($candidates, static fn(UploadCandidate $c): bool => $c->isUploadable()));
         $total = array_sum(array_map(static fn(UploadCandidate $c): int => $c->toUpload, $uploadable));
         if ($uploadable === []) {
             $io->note('Nothing to upload.');
+            $out->emit($this->report($resolved->id, $language, $dryRun, $autoApprove, $candidates, []));
             return Command::SUCCESS;
         }
 
@@ -88,7 +96,8 @@ final class TranslationsUploadCommand extends Command
             $resolved->identifier,
             $autoApprove ? '<comment>approved translations</comment>' : 'suggestions',
         ));
-        if ($input->getOption('dry-run')) {
+        if ($dryRun) {
+            $out->emit($this->report($resolved->id, $language, true, $autoApprove, $candidates, []));
             return Command::SUCCESS;
         }
 
@@ -97,17 +106,21 @@ final class TranslationsUploadCommand extends Command
         }
 
         $failed = 0;
+        $results = [];
         foreach ($uploadable as $i => $candidate) {
             $prefix = sprintf('[%d/%d] %s', $i + 1, count($uploadable), $candidate->relativePath);
             try {
                 $this->uploader->upload($resolved->id, $language, $candidate, $autoApprove, $allowSame);
+                $results[$candidate->relativePath] = ['status' => 'uploaded', 'error' => null];
                 $io->writeln(sprintf('%s <info>uploaded</info> (%d)', $prefix, $candidate->toUpload));
             } catch (\Throwable $e) {
                 $failed++;
+                $results[$candidate->relativePath] = ['status' => 'failed', 'error' => $e->getMessage()];
                 $io->writeln(sprintf('%s <error>failed</error>: %s', $prefix, $e->getMessage()));
             }
         }
 
+        $out->emit($this->report($resolved->id, $language, false, $autoApprove, $candidates, $results));
         if ($failed > 0) {
             $io->error(sprintf('%d of %d file(s) could not be uploaded.', $failed, count($uploadable)));
             return Command::FAILURE;
@@ -115,6 +128,41 @@ final class TranslationsUploadCommand extends Command
         $io->success(sprintf('%d file(s) uploaded.', count($uploadable)));
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * @param list<UploadCandidate> $candidates
+     * @param array<string, array{status: string, error: string|null}> $results the outcome of the upload, by file
+     * @return array<string, mixed>
+     */
+    private function report(int $projectId, string $language, bool $dryRun, bool $autoApprove, array $candidates, array $results): array
+    {
+        return [
+            'project' => $projectId,
+            'language' => $language,
+            'dry_run' => $dryRun,
+            'auto_approve' => $autoApprove,
+            'files' => array_map(static function (UploadCandidate $c) use ($results): array {
+                $result = $results[$c->relativePath] ?? null;
+                // "pending" is what a dry run reports for the files it would upload
+                $status = $result['status'] ?? match (true) {
+                    $c->skipReason !== null => 'skipped',
+                    !$c->isUploadable() => 'nothing_to_upload',
+                    default => 'pending',
+                };
+
+                return [
+                    'path' => $c->relativePath,
+                    'status' => $status,
+                    'skip_reason' => $c->skipReason,
+                    'to_upload' => $c->toUpload,
+                    'unchanged' => $c->unchanged,
+                    'same_as_source' => $c->sameAsSource,
+                    'untranslated' => $c->empty,
+                    'error' => $result['error'] ?? null,
+                ];
+            }, $candidates),
+        ];
     }
 
     private function describe(UploadCandidate $candidate): string

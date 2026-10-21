@@ -10,7 +10,7 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Console\Style\SymfonyStyle;
+use TYPO3\CrowdinCli\Service\CommandOutput;
 use TYPO3\CrowdinCli\Service\ContributorRepository;
 
 #[AsCommand(name: 'project:contributors', description: 'Rank the contributors of a project in one language')]
@@ -32,11 +32,13 @@ final class ProjectContributorsCommand extends Command
             ->addOption('from', null, InputOption::VALUE_REQUIRED, 'Only count contributions as of this date (YYYY-MM-DD)')
             ->addOption('to', null, InputOption::VALUE_REQUIRED, 'Only count contributions until this date (YYYY-MM-DD)')
             ->addOption('limit', 'l', InputOption::VALUE_REQUIRED, 'Maximum number of contributors displayed, 0 for all', '20');
+        CommandOutput::addOption($this);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
+        $out = new CommandOutput($input, $output);
+        $io = $out->io;
         /** @var numeric-string $project */
         $project = $input->getArgument('project');
         /** @var string $language */
@@ -54,33 +56,28 @@ final class ProjectContributorsCommand extends Command
         $limit = (int)$limitOption;
 
         if (!in_array($by, ContributorRepository::ORDERS, true)) {
-            $io->error(sprintf('Invalid value for --by, use one of: %s.', implode(', ', ContributorRepository::ORDERS)));
-            return Command::FAILURE;
+            return $out->fail(sprintf('Invalid value for --by, use one of: %s.', implode(', ', ContributorRepository::ORDERS)));
         }
         if (!in_array($unit, ContributorRepository::UNITS, true)) {
-            $io->error(sprintf('Invalid value for --unit, use one of: %s.', implode(', ', ContributorRepository::UNITS)));
-            return Command::FAILURE;
+            return $out->fail(sprintf('Invalid value for --unit, use one of: %s.', implode(', ', ContributorRepository::UNITS)));
         }
         if (!is_numeric($limitOption) || $limit < 0) {
-            $io->error('Invalid value for --limit, use a number (0 for all).');
-            return Command::FAILURE;
+            return $out->fail('Invalid value for --limit, use a number (0 for all).');
         }
         $from = $this->parseDate($fromOption, '00:00:00');
         $to = $this->parseDate($toOption, '23:59:59');
         if ($from === false || $to === false) {
-            $io->error('Invalid date, use the format YYYY-MM-DD.');
-            return Command::FAILURE;
+            return $out->fail('Invalid date, use the format YYYY-MM-DD.');
         }
 
         $io->writeln('Asking Crowdin for the report, this can take a few seconds...');
         try {
             $contributors = $this->repository->findContributors((int)$project, $language, $unit, $by, $from, $to);
         } catch (\Throwable $e) {
-            $io->error($e->getMessage());
-            return Command::FAILURE;
+            return $out->fail($e->getMessage());
         }
 
-        if ($contributors === []) {
+        if ($contributors === [] && !$out->json) {
             $io->warning(sprintf('No contribution found for language "%s".', $language));
             return Command::SUCCESS;
         }
@@ -89,6 +86,7 @@ final class ProjectContributorsCommand extends Command
         $rank = 0;
         $previous = null;
         $rows = [];
+        $entries = [];
         foreach ($shown as $position => $contributor) {
             $key = $by === 'approved' ? [$contributor->approved, $contributor->translated] : [$contributor->translated, $contributor->approved];
             // Contributors with the same figures share their rank
@@ -97,6 +95,28 @@ final class ProjectContributorsCommand extends Command
                 $previous = $key;
             }
             $rows[] = [$rank, $contributor->label(), $contributor->translated, $contributor->approved, $contributor->voted];
+            $entries[] = [
+                'rank' => $rank,
+                'username' => $contributor->username,
+                'name' => $contributor->fullName,
+                'translated' => $contributor->translated,
+                'approved' => $contributor->approved,
+                'votes' => $contributor->voted,
+            ];
+        }
+
+        if ($out->json) {
+            $out->emit([
+                'project' => (int)$project,
+                'language' => $language,
+                'unit' => $unit,
+                'ranked_by' => $by,
+                'from' => $fromOption,
+                'to' => $toOption,
+                'total' => count($contributors),
+                'contributors' => $entries,
+            ]);
+            return Command::SUCCESS;
         }
 
         $io->table(['Rank', 'Contributor', 'Translated', 'Approved', 'Votes'], $rows);

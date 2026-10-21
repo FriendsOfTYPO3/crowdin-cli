@@ -11,10 +11,10 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Console\Style\SymfonyStyle;
 use TYPO3\CrowdinCli\Entity\PendingTranslation;
 use TYPO3\CrowdinCli\Entity\StringReview;
 use TYPO3\CrowdinCli\Service\CellText;
+use TYPO3\CrowdinCli\Service\CommandOutput;
 use TYPO3\CrowdinCli\Service\PendingTranslationRepository;
 
 #[AsCommand(name: 'translations:unapproved', description: 'List translations which have not been approved yet, with their author')]
@@ -34,11 +34,13 @@ final class TranslationsUnapprovedCommand extends Command
             ->addOption('user', 'u', InputOption::VALUE_REQUIRED, 'Only show suggestions of this username (or user ID)')
             ->addOption('path', 'p', InputOption::VALUE_REQUIRED, 'Only show translations of files whose path starts with this value, e.g. "/14.3/typo3/sysext/backend"')
             ->addOption('limit', 'l', InputOption::VALUE_REQUIRED, 'Maximum number of strings to display', '100');
+        CommandOutput::addOption($this);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
+        $out = new CommandOutput($input, $output);
+        $io = $out->io;
         /** @var numeric-string $project */
         $project = $input->getArgument('project');
         /** @var string $language */
@@ -90,11 +92,10 @@ final class TranslationsUnapprovedCommand extends Command
             }
             $notShownHidden = count($hidden) - count($shownHidden);
         } catch (\Throwable $e) {
-            $io->error($e->getMessage());
-            return Command::FAILURE;
+            return $out->fail($e->getMessage());
         }
 
-        if ($reviews === []) {
+        if ($reviews === [] && !$out->json) {
             $io->success('No unapproved translations found.');
             return Command::SUCCESS;
         }
@@ -105,6 +106,52 @@ final class TranslationsUnapprovedCommand extends Command
             $byFile[$pathOf($review->candidates[0])][] = $review;
         }
         ksort($byFile);
+
+        // Summary per author (all unapproved translations) helps to decide on bulk approvals
+        $perUser = [];
+        foreach ($all as $t) {
+            $perUser[$t->authorLabel()] = ($perUser[$t->authorLabel()] ?? 0) + 1;
+        }
+        arsort($perUser);
+
+        if ($out->json) {
+            $files = [];
+            foreach ($byFile as $filePath => $fileReviews) {
+                usort($fileReviews, static fn(StringReview $a, StringReview $b): int => $a->improvesApproved() <=> $b->improvesApproved());
+                $files[] = [
+                    'path' => (string)$filePath,
+                    'strings' => array_map(static fn(StringReview $review): array => [
+                        'string_id' => $review->stringId,
+                        'plural_form' => $review->pluralForm,
+                        'source' => $sources[$review->stringId]['text'] ?? null,
+                        'contested' => $review->isContested(),
+                        'improves_approved' => $review->improvesApproved(),
+                        'approved_translation' => $review->approved?->text,
+                        'suggestions' => array_map(static fn(PendingTranslation $t): array => [
+                            'translation_id' => $t->translationId,
+                            'author' => $t->authorLabel(),
+                            'username' => $t->username,
+                            'created_at' => $t->createdAt,
+                            'text' => $t->text,
+                        ], $review->candidates),
+                    ], $fileReviews),
+                ];
+            }
+            $out->emit([
+                'project' => $projectId,
+                'language' => $language,
+                'total' => $total,
+                'shown' => count($reviews),
+                'not_shown_behind_approved' => $notShownHidden,
+                'files' => $files,
+                'authors' => array_map(
+                    static fn(string $author, int $count): array => ['author' => $author, 'count' => $count],
+                    array_keys($perUser),
+                    array_values($perUser)
+                ),
+            ]);
+            return Command::SUCCESS;
+        }
 
         foreach ($byFile as $filePath => $fileReviews) {
             usort($fileReviews, static fn(StringReview $a, StringReview $b): int => $a->improvesApproved() <=> $b->improvesApproved());
@@ -151,12 +198,6 @@ final class TranslationsUnapprovedCommand extends Command
             $io->writeln(sprintf('%d more string(s) have suggestions behind an approved translation: raise --limit to see them.', $notShownHidden));
         }
 
-        // Summary per author (all unapproved translations) helps to decide on bulk approvals
-        $perUser = [];
-        foreach ($all as $t) {
-            $perUser[$t->authorLabel()] = ($perUser[$t->authorLabel()] ?? 0) + 1;
-        }
-        arsort($perUser);
         if ($perUser === []) {
             return Command::SUCCESS;
         }

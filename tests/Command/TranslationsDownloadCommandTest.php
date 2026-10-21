@@ -96,6 +96,28 @@ final class TranslationsDownloadCommandTest extends TestCase
         self::assertStringContainsString('1 file(s) extracted to', $this->tester->getDisplay());
     }
 
+    public function testJsonFormat(): void
+    {
+        $status = $this->tester->execute(['project' => 'typo3-cms', 'language' => 'fr', '--format' => 'json']);
+
+        self::assertSame(Command::SUCCESS, $status);
+        /** @var array{project: int, language: string, files: list<string>} $result */
+        $result = json_decode($this->tester->getDisplay(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame(368815, $result['project']);
+        self::assertSame('fr', $result['language']);
+        self::assertSame(['sysext/backend/fr.locallang.xlf'], $result['files']);
+    }
+
+    public function testJsonFormatReportsErrors(): void
+    {
+        $status = $this->tester->execute(['project' => 'unknown', 'language' => 'fr', '--format' => 'json']);
+
+        self::assertSame(Command::FAILURE, $status);
+        /** @var array{error: array<string, string>} $result */
+        $result = json_decode($this->tester->getDisplay(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertArrayHasKey('message', $result['error']);
+    }
+
     public function testUsesTheGivenOutputDirectoryAsIs(): void
     {
         $target = $this->workingDirectory . '/custom';

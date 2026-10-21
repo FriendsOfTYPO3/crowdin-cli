@@ -10,8 +10,8 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Console\Style\SymfonyStyle;
 use TYPO3\CrowdinCli\Service\ApprovalLog;
+use TYPO3\CrowdinCli\Service\CommandOutput;
 use TYPO3\CrowdinCli\Service\PendingTranslationRepository;
 
 #[AsCommand(name: 'translations:undo', description: 'Revoke the approvals made by this tool in a session (default: the last one)')]
@@ -29,12 +29,18 @@ final class TranslationsUndoCommand extends Command
         $this
             ->addArgument('session', InputArgument::OPTIONAL, 'Session ID, as shown at the end of "interactive" (default: the last session)')
             ->addOption('list', 'l', InputOption::VALUE_NONE, 'List the sessions with approvals which can be revoked')
-            ->addOption('yes', 'y', InputOption::VALUE_NONE, 'Do not ask for confirmation');
+            ->addOption('yes', 'y', InputOption::VALUE_NONE, 'Do not ask for confirmation (required with --format=json)');
+        CommandOutput::addOption($this);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
+        $out = new CommandOutput($input, $output);
+        $io = $out->io;
+
+        if ($out->json && !$input->getOption('list') && !$input->getOption('yes')) {
+            return $out->fail('--format=json cannot ask for confirmation: add --yes to revoke.', Command::INVALID);
+        }
 
         try {
             if ($input->getOption('list')) {
@@ -43,6 +49,14 @@ final class TranslationsUndoCommand extends Command
                     $sessions[$entry['session']] ??= ['count' => 0, 'projects' => []];
                     $sessions[$entry['session']]['count']++;
                     $sessions[$entry['session']]['projects'][$entry['project'] . ' ' . $entry['language']] = true;
+                }
+                if ($out->json) {
+                    $out->emit(['sessions' => array_map(
+                        static fn(string $id, array $s): array => ['session' => $id, 'approvals' => $s['count'], 'projects' => array_keys($s['projects'])],
+                        array_keys($sessions),
+                        array_values($sessions)
+                    )]);
+                    return Command::SUCCESS;
                 }
                 if ($sessions === []) {
                     $io->note('No approvals to revoke.');
@@ -61,6 +75,7 @@ final class TranslationsUndoCommand extends Command
             $entries = $sessionId === null ? [] : $this->approvalLog->entriesOfSession($sessionId);
             if ($entries === []) {
                 $io->note($sessionId === null ? 'No approvals to revoke.' : sprintf('No approvals found for session "%s" (see --list).', $sessionId));
+                $out->emit(['session' => $sessionId, 'revoked' => [], 'failed' => []]);
                 return Command::SUCCESS;
             }
 
@@ -70,20 +85,22 @@ final class TranslationsUndoCommand extends Command
             }
 
             $revoked = [];
+            $failures = [];
             foreach ($entries as $entry) {
                 try {
                     $this->repository->revokeApproval($entry['project'], $entry['approvalId']);
                     $revoked[] = $entry['approvalId'];
                 } catch (\Throwable $e) {
+                    $failures[] = ['translation_id' => $entry['translationId'], 'approval_id' => $entry['approvalId'], 'error' => $e->getMessage()];
                     $io->warning(sprintf('Translation %d: %s', $entry['translationId'], $e->getMessage()));
                 }
             }
             $this->approvalLog->forget($revoked);
         } catch (\Throwable $e) {
-            $io->error($e->getMessage());
-            return Command::FAILURE;
+            return $out->fail($e->getMessage());
         }
 
+        $out->emit(['session' => $sessionId, 'revoked' => $revoked, 'failed' => $failures]);
         if (count($revoked) < count($entries)) {
             $io->error(sprintf('%d revocation(s) failed, they stay in the log.', count($entries) - count($revoked)));
             return Command::FAILURE;

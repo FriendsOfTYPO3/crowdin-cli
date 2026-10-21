@@ -10,8 +10,8 @@ use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Console\Style\SymfonyStyle;
 use TYPO3\CrowdinCli\Entity\LanguageProgress;
+use TYPO3\CrowdinCli\Service\CommandOutput;
 use TYPO3\CrowdinCli\Service\ProjectProgressRepository;
 
 #[AsCommand(name: 'project:status', description: 'Show the translation status of a project')]
@@ -28,11 +28,13 @@ final class ProjectStatusCommand extends Command
         $this
             ->addArgument('project', InputArgument::REQUIRED, 'Crowdin project ID')
             ->addOption('language', 'L', InputOption::VALUE_REQUIRED, 'Only show this language, e.g. "fr"');
+        CommandOutput::addOption($this);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
+        $out = new CommandOutput($input, $output);
+        $io = $out->io;
         /** @var numeric-string $project */
         $project = $input->getArgument('project');
         /** @var string|null $language */
@@ -42,8 +44,20 @@ final class ProjectStatusCommand extends Command
         try {
             $progress = $this->repository->findProgress($projectId, $language);
         } catch (\Throwable $e) {
-            $io->error($e->getMessage());
-            return Command::FAILURE;
+            return $out->fail($e->getMessage());
+        }
+
+        if ($out->json) {
+            $out->emit([
+                'project' => $projectId,
+                'languages' => array_map(static fn(LanguageProgress $p): array => [
+                    'language' => $p->languageId,
+                    'approved' => $p->approved,
+                    'pending' => $p->pending(),
+                    'translated' => $p->translated,
+                ], array_values($progress)),
+            ]);
+            return Command::SUCCESS;
         }
 
         if ($progress === []) {

@@ -13,7 +13,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Console\Style\SymfonyStyle;
+use TYPO3\CrowdinCli\Service\CommandOutput;
 
 #[AsCommand(name: 'projects:list', description: 'List all available Crowdin projects')]
 final class ProjectsListCommand extends Command
@@ -29,11 +29,13 @@ final class ProjectsListCommand extends Command
     protected function configure(): void
     {
         $this->addOption('refresh', 'r', InputOption::VALUE_NONE, 'Fetch the projects from Crowdin and update the local configuration first');
+        CommandOutput::addOption($this);
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
     {
-        $io = new SymfonyStyle($input, $output);
+        $out = new CommandOutput($input, $output);
+        $io = $out->io;
 
         try {
             if ($input->getOption('refresh')) {
@@ -41,8 +43,20 @@ final class ProjectsListCommand extends Command
             }
             $projects = $this->reader->read();
         } catch (\Throwable $e) {
-            $io->error($e->getMessage() . ' (try "projects:list --refresh")');
-            return Command::FAILURE;
+            return $out->fail($e->getMessage() . ' (try "projects:list --refresh")');
+        }
+
+        if ($out->json) {
+            $out->emit(['projects' => array_map(
+                static fn($p): array => [
+                    'id' => $p->id,
+                    'identifier' => $p->identifier,
+                    'name' => $p->extensionKey,
+                    'languages' => array_map(static fn(Language $l): string => $l->id, $p->languages),
+                ],
+                array_values($projects)
+            )]);
+            return Command::SUCCESS;
         }
 
         $io->table(
