@@ -57,4 +57,16 @@ final class PendingTranslationTest extends TestCase
         self::assertFalse($translation->isSuggestedBy('jdoe'));
         self::assertFalse($translation->isSuggestedBy(''));
     }
+
+    public function testReviewKeyDistinguishesPluralForms(): void
+    {
+        $one = new PendingTranslation(1, 2, 'Text', null, null, null, '2026-10-19T10:00:00+00:00', 'one');
+        $other = new PendingTranslation(3, 2, 'Text', null, null, null, '2026-10-19T10:00:00+00:00', 'other');
+        $plain = $this->create(null, null, null);
+        $plainRival = new PendingTranslation(9, 2, 'Other text', null, null, null, '2026-10-20T10:00:00+00:00');
+
+        self::assertNotSame($one->reviewKey(), $other->reviewKey());
+        self::assertNotSame($one->reviewKey(), $plain->reviewKey());
+        self::assertSame($plain->reviewKey(), $plainRival->reviewKey());
+    }
 }

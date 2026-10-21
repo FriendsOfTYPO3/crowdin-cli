@@ -31,6 +31,15 @@ final readonly class PendingTranslation
             : $this->username;
     }
 
+    /**
+     * Identifies what is translated: the string and, for plural strings, the plural form.
+     * Suggestions with the same key compete with each other.
+     */
+    public function reviewKey(): string
+    {
+        return $this->stringId . ':' . ($this->pluralForm ?? '');
+    }
+
     public function isSuggestedBy(string $user): bool
     {
         return ($this->username !== null && strcasecmp($this->username, $user) === 0)

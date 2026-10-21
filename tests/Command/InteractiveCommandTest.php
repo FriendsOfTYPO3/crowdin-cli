@@ -13,6 +13,7 @@ use CrowdinApiClient\Model\File;
 use CrowdinApiClient\Model\LanguageTranslation;
 use CrowdinApiClient\Model\Progress;
 use CrowdinApiClient\Model\SourceString;
+use CrowdinApiClient\Model\StringTranslation;
 use CrowdinApiClient\Model\StringTranslationApproval;
 use CrowdinApiClient\ModelCollection;
 use FriendsOfTYPO3\CrowdinBase\Configuration\ConfigurationReader;
@@ -57,6 +58,14 @@ final class InteractiveCommandTest extends TestCase
             self::translation(3, 13, 'bob'),
             self::translation(4, 14, 'alice'),
         ]));
+
+        // Crowdin lists every suggestion and approval of a string on demand only
+        $this->stringTranslation->method('list')->willReturnCallback(
+            fn(int $projectId, array $params): ModelCollection => self::collection($this->competing[$params['stringId']] ?? [])
+        );
+        $this->stringTranslation->method('listApprovals')->willReturnCallback(
+            fn(int $projectId, array $params): ModelCollection => self::collection($this->approvals[$params['stringId']] ?? [])
+        );
 
         $sourceString = $this->createMock(SourceStringApi::class);
         $sourceString->method('get')->willReturnCallback(
@@ -129,6 +138,32 @@ final class InteractiveCommandTest extends TestCase
     /** @var list<int> */
     private array $approvalCalls = [];
 
+    /** @var array<int, list<StringTranslation>> all translations (approved or not) by string ID, if more than the listed one */
+    private array $competing = [];
+
+    /** @var array<int, list<StringTranslationApproval>> */
+    private array $approvals = [];
+
+    private static function suggestion(int $id, string $username, string $createdAt = '2026-10-19T10:00:00+00:00'): StringTranslation
+    {
+        return new StringTranslation([
+            'id' => $id,
+            'text' => 'Variante ' . $id,
+            'user' => ['id' => $id, 'username' => $username, 'fullName' => $username],
+            'rating' => 0,
+            'createdAt' => $createdAt,
+            'pluralCategoryName' => null,
+        ]);
+    }
+
+    /**
+     * String 1 of alice (translation 11) competes with a later suggestion of carol (translation 21).
+     */
+    private function competeOnStringOne(): void
+    {
+        $this->competing[1] = [self::suggestion(11, 'alice'), self::suggestion(21, 'carol', '2026-10-20T10:00:00+00:00')];
+    }
+
     public function testRefusesToRunWithoutInteraction(): void
     {
         $status = $this->tester->execute([], ['interactive' => false]);
@@ -198,6 +233,123 @@ final class InteractiveCommandTest extends TestCase
 
         self::assertSame(0, $status);
         self::assertStringNotContainsString('dropped', $this->tester->getDisplay());
+    }
+
+    public function testStringWithCompetingSuggestionsIsReviewedOnItsOwn(): void
+    {
+        $this->competeOnStringOne();
+        $this->expectApprovals(1);
+        $deleted = [];
+        $this->stringTranslation
+            ->expects(self::once())
+            ->method('delete')
+            ->willReturnCallback(static function (int $projectId, int $translationId) use (&$deleted): void {
+                $deleted[] = $translationId;
+            });
+
+        // alice has 3 pending strings, 1 of them contested: skip the chunk of the 2 others, approve the suggestion of carol, delete the other
+        $this->tester->setInputs(['s', '2', 'yes']);
+        $status = $this->tester->execute(['--project' => '123', '--language' => 'fr', '--user' => 'alice']);
+
+        self::assertSame(0, $status);
+        self::assertSame([21], $this->approvalCalls);
+        self::assertSame([11], $deleted);
+        $display = $this->tester->getDisplay();
+        self::assertStringContainsString('Chunk 1 of 1 (2 translation(s))', $display);
+        self::assertStringContainsString('Competing suggestions 1 of 1 (2 for the same string)', $display);
+        self::assertStringContainsString('(none yet: this string is not translated)', $display);
+        self::assertStringContainsString('Variante 11', $display);
+        self::assertStringContainsString('Variante 21', $display);
+        self::assertStringContainsString('1 dropped', $display);
+        self::assertSame([21], array_column($this->log->entries(), 'translationId'));
+    }
+
+    public function testCompetingSuggestionsStayIfTheirDeletionIsDeclined(): void
+    {
+        $this->competeOnStringOne();
+        $this->expectApprovals(1);
+        $this->stringTranslation->expects(self::never())->method('delete');
+
+        $this->tester->setInputs(['s', '1', 'no']);
+        $this->tester->execute(['--project' => '123', '--language' => 'fr', '--user' => 'alice']);
+
+        self::assertSame([11], $this->approvalCalls);
+        self::assertStringNotContainsString('dropped', $this->tester->getDisplay());
+    }
+
+    public function testKeepingTheCurrentTranslationDeletesAllSuggestions(): void
+    {
+        $this->competeOnStringOne();
+        $this->competing[1][] = self::suggestion(99, 'dave', '2025-01-01T10:00:00+00:00');
+        $this->approvals[1] = [new StringTranslationApproval(['id' => 500, 'translationId' => 99, 'stringId' => 1])];
+        $this->stringTranslation->expects(self::never())->method('createApproval');
+        $deleted = [];
+        $this->stringTranslation
+            ->expects(self::exactly(2))
+            ->method('delete')
+            ->willReturnCallback(static function (int $projectId, int $translationId) use (&$deleted): void {
+                $deleted[] = $translationId;
+            });
+
+        $this->tester->setInputs(['s', 'k', 'yes']);
+        $this->tester->execute(['--project' => '123', '--language' => 'fr', '--user' => 'alice']);
+
+        self::assertSame([11, 21], $deleted);
+        $display = $this->tester->getDisplay();
+        self::assertStringContainsString('Variante 99 (approved, by dave)', $display);
+        self::assertStringContainsString('[k] keep the current translation', $display);
+    }
+
+    public function testKeepIsOnlyOfferedIfThereIsACurrentTranslation(): void
+    {
+        $this->competeOnStringOne();
+        $this->stringTranslation->expects(self::never())->method('delete');
+
+        $this->tester->setInputs(['s', 'k', 's']);
+        $this->tester->execute(['--project' => '123', '--language' => 'fr', '--user' => 'alice']);
+
+        self::assertStringContainsString('Not understood', $this->tester->getDisplay());
+        self::assertStringNotContainsString('keep the current translation', $this->tester->getDisplay());
+    }
+
+    public function testDroppingSomeCompetingSuggestionsShowsWhatIsLeft(): void
+    {
+        $this->competeOnStringOne();
+        $this->competing[1][] = self::suggestion(31, 'erin', '2026-10-21T10:00:00+00:00');
+        $this->expectApprovals(1);
+        $deleted = [];
+        $this->stringTranslation
+            ->expects(self::exactly(2))
+            ->method('delete')
+            ->willReturnCallback(static function (int $projectId, int $translationId) use (&$deleted): void {
+                $deleted[] = $translationId;
+            });
+
+        // Drop the first suggestion, approve what is then the first one (21), delete the remaining rival (31)
+        $this->tester->setInputs(['s', 'd 1', 'yes', '1', 'yes']);
+        $this->tester->execute(['--project' => '123', '--language' => 'fr', '--user' => 'alice']);
+
+        self::assertSame([11, 31], $deleted);
+        self::assertSame([21], $this->approvalCalls);
+        self::assertStringContainsString('Competing suggestions 1 of 1 (3 for the same string)', $this->tester->getDisplay());
+        self::assertStringContainsString('Competing suggestions 1 of 1 (2 for the same string)', $this->tester->getDisplay());
+    }
+
+    public function testSuggestionsImprovingAnApprovedTranslationComeAfterUntranslatedStrings(): void
+    {
+        $this->competing[2] = [self::suggestion(12, 'alice'), self::suggestion(99, 'dave', '2025-01-01T10:00:00+00:00')];
+        $this->approvals[2] = [new StringTranslationApproval(['id' => 500, 'translationId' => 99, 'stringId' => 2])];
+        $this->stringTranslation->expects(self::never())->method('createApproval');
+
+        $this->tester->setInputs(['s', 's']);
+        $this->tester->execute(['--project' => '123', '--language' => 'fr', '--user' => 'alice']);
+
+        $display = $this->tester->getDisplay();
+        self::assertStringContainsString('Chunk 1 of 2 (2 translation(s))', $display);
+        self::assertStringContainsString('Chunk 2 of 2 (1 translation(s), improving an approved translation: less urgent)', $display);
+        self::assertStringContainsString('Current translation', $display);
+        self::assertStringContainsString('Variante 99', $display);
+        self::assertLessThan(strpos($display, 'Chunk 2 of 2'), strpos($display, 'Chunk 1 of 2'));
     }
 
     public function testNothingToDoWhenEverythingIsApproved(): void

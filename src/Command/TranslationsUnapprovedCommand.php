@@ -12,6 +12,8 @@ use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
+use TYPO3\CrowdinCli\Entity\PendingTranslation;
+use TYPO3\CrowdinCli\Entity\StringReview;
 use TYPO3\CrowdinCli\Service\CellText;
 use TYPO3\CrowdinCli\Service\PendingTranslationRepository;
 
@@ -31,7 +33,7 @@ final class TranslationsUnapprovedCommand extends Command
             ->addArgument('language', InputArgument::REQUIRED, 'Language ID, e.g. "de"')
             ->addOption('user', 'u', InputOption::VALUE_REQUIRED, 'Only show suggestions of this username (or user ID)')
             ->addOption('path', 'p', InputOption::VALUE_REQUIRED, 'Only show translations of files whose path starts with this value, e.g. "/14.3/typo3/sysext/backend"')
-            ->addOption('limit', 'l', InputOption::VALUE_REQUIRED, 'Maximum number of translations to display', '100');
+            ->addOption('limit', 'l', InputOption::VALUE_REQUIRED, 'Maximum number of strings to display', '100');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -58,45 +60,77 @@ final class TranslationsUnapprovedCommand extends Command
                 $path
             );
             $all = $pending;
-            $total = count($pending);
-            $pending = array_slice($pending, 0, $limit);
+            // The limit applies to what is displayed, in the order it is displayed (by file): resolve every source first,
+            // or a file would be cut at an arbitrary place, in the order of Crowdin
             $sources = $this->repository->findSources($projectId, array_map(static fn($t): int => $t->stringId, $pending));
             $paths = $this->repository->findFilePaths($projectId, array_values(array_unique(array_column($sources, 'fileId'))));
+            $pathOf = static fn(PendingTranslation $t): string => $paths[$sources[$t->stringId]['fileId'] ?? 0] ?? '(unknown file)';
+            usort($pending, static fn(PendingTranslation $a, PendingTranslation $b): int => [$pathOf($a), $a->translationId] <=> [$pathOf($b), $b->translationId]);
+
+            // Several suggestions may compete for one string, which is then displayed once
+            $strings = [];
+            foreach ($pending as $t) {
+                $strings[$t->reviewKey()] ??= $t;
+            }
+            $total = count($strings);
+            $reviews = $this->repository->findReviews($projectId, $language, array_slice(array_values($strings), 0, $limit));
         } catch (\Throwable $e) {
             $io->error($e->getMessage());
             return Command::FAILURE;
         }
 
-        if ($pending === []) {
+        if ($reviews === []) {
             $io->success('No unapproved translations found.');
             return Command::SUCCESS;
         }
 
-        // Group by file, ordered by path
+        // Group by file, ordered by path. Strings without translation first, then the ones which only improve an approved translation
         $byFile = [];
-        foreach ($pending as $t) {
-            $byFile[$paths[$sources[$t->stringId]['fileId'] ?? 0] ?? '(unknown file)'][] = $t;
+        foreach ($reviews as $review) {
+            $byFile[$pathOf($review->candidates[0])][] = $review;
         }
         ksort($byFile);
 
-        foreach ($byFile as $filePath => $translations) {
-            $io->section(sprintf('%s (%d)', $filePath, count($translations)));
+        foreach ($byFile as $filePath => $fileReviews) {
+            usort($fileReviews, static fn(StringReview $a, StringReview $b): int => $a->improvesApproved() <=> $b->improvesApproved());
+            $showCurrent = array_any($fileReviews, static fn(StringReview $r): bool => $r->improvesApproved());
+            $io->section(sprintf('%s (%d)', $filePath, count($fileReviews)));
             $rows = [];
-            foreach ($translations as $i => $t) {
+            foreach ($fileReviews as $i => $review) {
                 if ($i > 0) {
                     $rows[] = new TableSeparator();
                 }
-                $rows[] = [
-                    $t->translationId,
-                    $t->authorLabel(),
-                    substr($t->createdAt, 0, 10),
-                    CellText::wrap($sources[$t->stringId]['text'] ?? '?'),
-                    CellText::wrap($t->text),
-                ];
+                $source = CellText::wrap($sources[$review->stringId]['text'] ?? '?');
+                foreach ($review->candidates as $j => $t) {
+                    if ($j === 0) {
+                        $sourceCell = $review->isContested() ? sprintf("%d SUGGESTIONS FOR THIS STRING\n%s", count($review->candidates), $source) : $source;
+                    } else {
+                        $sourceCell = '(same string)';
+                    }
+                    $row = [$t->translationId, $t->authorLabel(), substr($t->createdAt, 0, 10), $sourceCell];
+                    if ($showCurrent) {
+                        $row[] = $j === 0 ? CellText::wrap($review->approved->text ?? '') : '';
+                    }
+                    $row[] = CellText::wrap($t->text);
+                    $rows[] = $row;
+                }
             }
-            $io->table(['Translation ID', 'Suggested by', 'Date', 'Source', 'Translation'], $rows);
+            $headers = ['Translation ID', 'Suggested by', 'Date', 'Source'];
+            if ($showCurrent) {
+                $headers[] = 'Current translation (approved)';
+            }
+            $headers[] = 'Suggestion';
+            $io->table($headers, $rows);
         }
-        $io->writeln(sprintf('Showing %d of %d unapproved translation(s).', count($pending), $total));
+        $io->writeln(sprintf('Showing %d of %d string(s) with unapproved translations.', count($reviews), $total));
+        $contested = count(array_filter($reviews, static fn(StringReview $r): bool => $r->isContested()));
+        if ($contested > 0) {
+            $io->writeln(sprintf('%d string(s) have competing suggestions: approving one makes the others pointless (see "translations:approve --drop-rivals").', $contested));
+        }
+        $improvements = count(array_filter($reviews, static fn(StringReview $r): bool => $r->improvesApproved()));
+        if ($improvements > 0) {
+            $io->writeln(sprintf('%d string(s) already have an approved translation: their suggestions only try to improve it, so they are less urgent.', $improvements));
+        }
 
         // Summary per author (all unapproved translations) helps to decide on bulk approvals
         $perUser = [];

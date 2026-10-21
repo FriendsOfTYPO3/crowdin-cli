@@ -14,6 +14,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use TYPO3\CrowdinCli\Entity\LanguageProgress;
 use TYPO3\CrowdinCli\Entity\PendingTranslation;
+use TYPO3\CrowdinCli\Entity\StringReview;
 use TYPO3\CrowdinCli\Service\ApprovalLog;
 use TYPO3\CrowdinCli\Service\CellText;
 use TYPO3\CrowdinCli\Service\PendingTranslationRepository;
@@ -245,6 +246,10 @@ final class InteractiveCommand extends Command
     }
 
     /**
+     * Reviews the selection in two steps: first the strings which have a single suggestion, chunk by chunk (the ones
+     * which have no translation yet first, then the ones which try to improve an approved translation), then the
+     * strings with competing suggestions, one at a time, since approving one makes the others pointless.
+     *
      * @param list<PendingTranslation> $selection
      * @param positive-int $pageSize
      * @return bool false if the user quits
@@ -256,12 +261,29 @@ final class InteractiveCommand extends Command
         $paths = $this->repository->findFilePaths($projectId, array_values(array_unique(array_column($sources, 'fileId'))));
         $pathOf = static fn(PendingTranslation $t): string => $paths[$sources[$t->stringId]['fileId'] ?? 0] ?? '(unknown file)';
 
-        usort($selection, static fn(PendingTranslation $a, PendingTranslation $b): int => [$pathOf($a), $a->translationId] <=> [$pathOf($b), $b->translationId]);
-        $chunks = array_chunk($selection, $pageSize);
+        $io->writeln('Looking for competing suggestions and existing translations...');
+        $reviews = $this->repository->findReviews($projectId, $language, $selection);
+        usort($reviews, static fn(StringReview $a, StringReview $b): int => [$a->improvesApproved(), $pathOf($a->candidates[0]), $a->candidates[0]->translationId] <=> [$b->improvesApproved(), $pathOf($b->candidates[0]), $b->candidates[0]->translationId]);
+
+        $chunks = [];
+        foreach ([false, true] as $improvesApproved) {
+            $group = array_values(array_filter($reviews, static fn(StringReview $r): bool => !$r->isContested() && $r->improvesApproved() === $improvesApproved));
+            foreach (array_chunk($group, $pageSize) as $chunk) {
+                $chunks[] = $chunk;
+            }
+        }
 
         foreach ($chunks as $index => $chunk) {
-            $io->section(sprintf('Chunk %d of %d (%d translation(s))', $index + 1, count($chunks), count($chunk)));
-            $this->renderChunk($io, $chunk, $sources, $pathOf);
+            $improvesApproved = $chunk[0]->improvesApproved();
+            $io->section(sprintf(
+                'Chunk %d of %d (%d translation(s)%s)',
+                $index + 1,
+                count($chunks),
+                count($chunk),
+                $improvesApproved ? ', improving an approved translation: less urgent' : ''
+            ));
+            $this->renderChunk($io, $chunk, $sources, $pathOf, $improvesApproved);
+            $translations = array_map(static fn(StringReview $r): PendingTranslation => $r->candidates[0], $chunk);
 
             while (true) {
                 /** @var string $answer */
@@ -275,7 +297,7 @@ final class InteractiveCommand extends Command
                     return false;
                 }
                 if ($review->action === ReviewInput::DETAILS) {
-                    foreach ($chunk as $i => $t) {
+                    foreach ($translations as $i => $t) {
                         $identifier = $sources[$t->stringId]['identifier'] ?? '';
                         $io->writeln(sprintf('%d: %s (translation #%d) by %s on %s%s', $i + 1, $identifier !== '' ? $identifier : 'string #' . $t->stringId, $t->translationId, $t->authorLabel(), substr($t->createdAt, 0, 10), $t->pluralForm !== null ? ', plural form ' . $t->pluralForm : ''));
                     }
@@ -286,16 +308,23 @@ final class InteractiveCommand extends Command
                         $io->note('Nothing selected.');
                         continue;
                     }
-                    $this->approve($io, $projectId, $language, $chunk, $review->positions);
+                    $this->approve($io, $projectId, $language, $translations, $review->positions);
                 }
                 if ($review->action === ReviewInput::DROP) {
                     $question = sprintf('Permanently delete %d suggestion(s) (position(s) %s)? This cannot be undone', count($review->positions), implode(', ', $review->positions));
                     if (!$io->confirm($question, false)) {
                         continue;
                     }
-                    $this->drop($io, $projectId, $chunk, $review->positions);
+                    $this->drop($io, $projectId, $translations, $review->positions);
                 }
                 break;
+            }
+        }
+
+        $contested = array_values(array_filter($reviews, static fn(StringReview $r): bool => $r->isContested()));
+        foreach ($contested as $index => $review) {
+            if (!$this->reviewContested($io, $projectId, $language, $review, $sources, $pathOf, $index + 1, count($contested))) {
+                return false;
             }
         }
 
@@ -303,19 +332,114 @@ final class InteractiveCommand extends Command
     }
 
     /**
-     * @param list<PendingTranslation> $chunk
+     * Single-string step: several people suggested a translation for the same string.
+     *
      * @param array<int, array{text: string, fileId: int, identifier: string}> $sources
      * @param \Closure(PendingTranslation): string $pathOf
+     * @return bool false if the user quits
      */
-    private function renderChunk(SymfonyStyle $io, array $chunk, array $sources, \Closure $pathOf): void
+    private function reviewContested(SymfonyStyle $io, int $projectId, string $language, StringReview $review, array $sources, \Closure $pathOf, int $number, int $total): bool
     {
+        $first = $review->candidates[0];
+        $identifier = $sources[$first->stringId]['identifier'] ?? '';
+        $source = $sources[$first->stringId]['text'] ?? '?';
+
+        while (true) {
+            $candidates = $review->candidates;
+            $count = count($candidates);
+            $io->section(sprintf('Competing suggestions %d of %d (%d for the same string)', $number, $total, $count));
+            $io->writeln(sprintf('<info>%s</info>%s%s', $pathOf($first), $identifier !== '' ? ' (' . $identifier . ')' : '', $review->pluralForm !== null ? ', plural form ' . $review->pluralForm : ''));
+            $io->writeln('<comment>Source</comment>');
+            $io->writeln(CellText::wrap($source, 100));
+            $io->writeln('<comment>Current translation</comment>');
+            $io->writeln($review->approved !== null
+                ? CellText::wrap($review->approved->text, 100) . sprintf(' (approved, by %s)', $review->approved->authorLabel())
+                : '(none yet: this string is not translated)');
+
+            $rows = [];
+            foreach ($candidates as $i => $t) {
+                if ($i > 0) {
+                    $rows[] = new TableSeparator();
+                }
+                $rows[] = [$i + 1, $t->authorLabel(), substr($t->createdAt, 0, 10), CellText::wrap($t->text)];
+            }
+            $io->table(['#', 'Suggested by', 'Date', 'Translation'], $rows);
+
+            $canKeep = $review->approved !== null;
+            while (true) {
+                /** @var string $answer */
+                $answer = $io->ask(sprintf('[1-%d] approve that one  [d 1,2] drop some  %s[s] skip  [q] quit', $count, $canKeep ? '[k] keep the current translation  ' : ''), 's');
+                $input = ReviewInput::parseChoice($answer, $count, $canKeep);
+                if ($input === null) {
+                    $io->error(sprintf('Not understood. Examples: "1", "d 2", %s"s", "q".', $canKeep ? '"k", ' : ''));
+                    continue;
+                }
+
+                switch ($input->action) {
+                    case ReviewInput::QUIT:
+                        return false;
+                    case ReviewInput::SKIP:
+                        return true;
+                    case ReviewInput::CHOOSE:
+                        $chosen = $candidates[$input->positions[0] - 1];
+                        $this->approve($io, $projectId, $language, [$chosen], [1]);
+                        if (!$this->dryRun && !isset($this->approvedIds[$chosen->translationId])) {
+                            // The approval failed: the suggestions stay as they are
+                            continue 2;
+                        }
+                        $rivals = $review->rivalsOf($chosen);
+                        if ($rivals !== [] && $io->confirm(sprintf('Permanently delete the %d competing suggestion(s)? This cannot be undone', count($rivals)), true)) {
+                            $this->drop($io, $projectId, $rivals, range(1, count($rivals)));
+                        }
+
+                        return true;
+                    case ReviewInput::KEEP:
+                        if ($io->confirm(sprintf('Keep the current translation and permanently delete all %d suggestion(s)? This cannot be undone', $count), false)) {
+                            $this->drop($io, $projectId, $candidates, range(1, $count));
+
+                            return true;
+                        }
+                        continue 2;
+                    case ReviewInput::DROP:
+                        if (!$io->confirm(sprintf('Permanently delete %d suggestion(s) (position(s) %s)? This cannot be undone', count($input->positions), implode(', ', $input->positions)), false)) {
+                            continue 2;
+                        }
+                        $this->drop($io, $projectId, $candidates, $input->positions);
+                        $remaining = [];
+                        foreach ($candidates as $i => $t) {
+                            $gone = $this->dryRun ? in_array($i + 1, $input->positions, true) : isset($this->droppedIds[$t->translationId]);
+                            if (!$gone) {
+                                $remaining[] = $t;
+                            }
+                        }
+                        if ($remaining === []) {
+                            return true;
+                        }
+                        $review = new StringReview($review->stringId, $review->pluralForm, $remaining, $review->approved);
+                        // Show what is left
+                        continue 3;
+                }
+            }
+        }
+    }
+
+    /**
+     * @param list<StringReview> $chunk
+     * @param array<int, array{text: string, fileId: int, identifier: string}> $sources
+     * @param \Closure(PendingTranslation): string $pathOf
+     * @param bool $showCurrent whether to show the translation which is already approved
+     */
+    private function renderChunk(SymfonyStyle $io, array $chunk, array $sources, \Closure $pathOf, bool $showCurrent): void
+    {
+        $headers = $showCurrent ? ['#', 'Suggested by', 'Source', 'Current translation', 'Suggestion'] : ['#', 'Suggested by', 'Source', 'Translation'];
         $currentPath = null;
         $rows = [];
-        foreach ($chunk as $i => $t) {
+        foreach ($chunk as $i => $review) {
+            $t = $review->candidates[0];
             $path = $pathOf($t);
             if ($path !== $currentPath) {
                 if ($rows !== []) {
-                    $io->table(['#', 'Suggested by', 'Source', 'Translation'], $rows);
+                    $io->table($headers, $rows);
                     $rows = [];
                 }
                 $io->writeln(sprintf('<info>%s</info>', $path));
@@ -324,14 +448,18 @@ final class InteractiveCommand extends Command
             if ($rows !== []) {
                 $rows[] = new TableSeparator();
             }
-            $rows[] = [
+            $row = [
                 $i + 1,
                 $t->authorLabel(),
                 CellText::wrap($sources[$t->stringId]['text'] ?? '?'),
-                CellText::wrap($t->text),
             ];
+            if ($showCurrent) {
+                $row[] = CellText::wrap($review->approved->text ?? '');
+            }
+            $row[] = CellText::wrap($t->text);
+            $rows[] = $row;
         }
-        $io->table(['#', 'Suggested by', 'Source', 'Translation'], $rows);
+        $io->table($headers, $rows);
     }
 
     /**

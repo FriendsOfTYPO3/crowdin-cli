@@ -11,11 +11,13 @@ use CrowdinApiClient\Crowdin;
 use CrowdinApiClient\Model\File;
 use CrowdinApiClient\Model\LanguageTranslation;
 use CrowdinApiClient\Model\SourceString;
+use CrowdinApiClient\Model\StringTranslation;
 use CrowdinApiClient\Model\StringTranslationApproval;
 use CrowdinApiClient\ModelCollection;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use TYPO3\CrowdinCli\Entity\PendingTranslation;
 use TYPO3\CrowdinCli\Service\PendingTranslationRepository;
 
 #[AllowMockObjectsWithoutExpectations]
@@ -55,7 +57,7 @@ final class PendingTranslationRepositoryTest extends TestCase
     }
 
     /**
-     * @param list<LanguageTranslation> $items
+     * @param list<object> $items
      */
     private static function collection(array $items): ModelCollection
     {
@@ -221,6 +223,101 @@ final class PendingTranslationRepositoryTest extends TestCase
 
         self::assertSame([0, 500], $offsets);
         self::assertCount(501, $result);
+    }
+
+    /**
+     * @param array<string, mixed> $overrides
+     */
+    private static function stringTranslation(int $id, string $username, string $createdAt, array $overrides = []): StringTranslation
+    {
+        return new StringTranslation($overrides + [
+            'id' => $id,
+            'text' => 'Text ' . $id,
+            'user' => ['id' => $id, 'username' => $username, 'fullName' => $username],
+            'rating' => 0,
+            'createdAt' => $createdAt,
+            'pluralCategoryName' => null,
+        ]);
+    }
+
+    private static function pending(int $stringId, int $translationId, string $username, ?string $pluralForm = null): PendingTranslation
+    {
+        return new PendingTranslation($translationId, $stringId, 'Text ' . $translationId, $translationId, $username, $username, '2026-10-21T10:00:00+00:00', $pluralForm);
+    }
+
+    public function testFindReviewsGathersCompetingSuggestionsOldestFirst(): void
+    {
+        $this->stringTranslation
+            ->expects(self::once())
+            ->method('list')
+            ->with(123, ['stringId' => 5, 'languageId' => 'de', 'limit' => 500])
+            ->willReturn(self::collection([
+                self::stringTranslation(52, 'bob', '2026-10-21T10:00:00+00:00'),
+                self::stringTranslation(51, 'alice', '2026-10-20T10:00:00+00:00'),
+            ]));
+        $this->stringTranslation
+            ->expects(self::once())
+            ->method('listApprovals')
+            ->with(123, ['stringId' => 5, 'languageId' => 'de', 'limit' => 500])
+            ->willReturn(self::collection([]));
+
+        $reviews = $this->subject->findReviews(123, 'de', [self::pending(5, 52, 'bob')]);
+
+        self::assertCount(1, $reviews);
+        self::assertSame(5, $reviews[0]->stringId);
+        self::assertSame([51, 52], array_map(static fn($t): int => $t->translationId, $reviews[0]->candidates));
+        self::assertSame('alice', $reviews[0]->candidates[0]->username);
+        self::assertTrue($reviews[0]->isContested());
+        self::assertNull($reviews[0]->approved);
+        self::assertFalse($reviews[0]->improvesApproved());
+    }
+
+    public function testFindReviewsSeparatesTheApprovedTranslationFromTheSuggestions(): void
+    {
+        $this->stringTranslation->method('list')->willReturn(self::collection([
+            self::stringTranslation(51, 'alice', '2026-10-19T10:00:00+00:00'),
+            self::stringTranslation(52, 'bob', '2026-10-21T10:00:00+00:00'),
+        ]));
+        $this->stringTranslation->method('listApprovals')->willReturn(self::collection([
+            new StringTranslationApproval(['id' => 900, 'translationId' => 51, 'stringId' => 5]),
+        ]));
+
+        $reviews = $this->subject->findReviews(123, 'de', [self::pending(5, 52, 'bob')]);
+
+        self::assertSame(51, $reviews[0]->approved?->translationId);
+        self::assertSame([52], array_map(static fn($t): int => $t->translationId, $reviews[0]->candidates));
+        self::assertFalse($reviews[0]->isContested());
+        self::assertTrue($reviews[0]->improvesApproved());
+    }
+
+    public function testFindReviewsKeepsTheGivenTranslationEvenIfCrowdinDoesNotListIt(): void
+    {
+        $this->stringTranslation->method('list')->willReturn(self::collection([]));
+        $this->stringTranslation->method('listApprovals')->willReturn(self::collection([]));
+
+        $reviews = $this->subject->findReviews(123, 'de', [self::pending(5, 52, 'bob')]);
+
+        self::assertSame([52], array_map(static fn($t): int => $t->translationId, $reviews[0]->candidates));
+    }
+
+    public function testFindReviewsLoadsEachStringOnceAndKeepsPluralFormsApart(): void
+    {
+        $this->stringTranslation
+            ->expects(self::once())
+            ->method('list')
+            ->willReturn(self::collection([
+                self::stringTranslation(51, 'alice', '2026-10-19T10:00:00+00:00', ['pluralCategoryName' => 'one']),
+                self::stringTranslation(52, 'bob', '2026-10-20T10:00:00+00:00', ['pluralCategoryName' => 'one']),
+                self::stringTranslation(53, 'alice', '2026-10-19T10:00:00+00:00', ['pluralCategoryName' => 'other']),
+            ]));
+        $this->stringTranslation->expects(self::once())->method('listApprovals')->willReturn(self::collection([]));
+
+        $reviews = $this->subject->findReviews(123, 'de', [self::pending(5, 51, 'alice', 'one'), self::pending(5, 53, 'alice', 'other')]);
+
+        self::assertCount(2, $reviews);
+        self::assertSame([51, 52], array_map(static fn($t): int => $t->translationId, $reviews[0]->candidates));
+        self::assertSame('one', $reviews[0]->pluralForm);
+        self::assertSame([53], array_map(static fn($t): int => $t->translationId, $reviews[1]->candidates));
     }
 
     public function testFindSourceTextsFetchesEachStringOnce(): void

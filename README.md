@@ -73,6 +73,22 @@ commands described further down by hand:
    | `v`         | Show details (translation ID, string ID, date, plural form), then ask again. |
    | `q`         | Quit.                                                                        |
 
+   Chunks only hold strings with a *single* suggestion. Strings which have no translation yet come first, then the
+   ones which already have an approved translation and only get a suggestion to improve it (shown in an extra
+   "Current translation" column): those are less urgent.
+
+   Strings for which *several* suggestions compete (Crowdin only lists one of them per string, the others are looked
+   up for what you review) are reviewed afterwards, one at a time, showing the source, the current translation (if
+   any) and every suggestion, oldest first:
+
+   | Answer      | Action                                                                       |
+   |-------------|------------------------------------------------------------------------------|
+   | `2`         | Approve suggestion 2, then ask whether to permanently delete the competing ones (default: yes). |
+   | `d 1,3`     | Drop (permanently delete) these suggestions, after a confirmation, then show what is left. |
+   | `k`         | Only offered if the string has an approved translation: keep it and delete all suggestions, after a confirmation. |
+   | `s` (Enter) | Skip the string, the suggestions stay pending.                               |
+   | `q`         | Quit.                                                                        |
+
    After the last chunk the suggester list comes back (with updated counts), then the language list.
 
 | Option                  | Description                                                                 |
@@ -84,7 +100,8 @@ commands described further down by hand:
 | `-s`, `--page-size=N`   | Translations per chunk (default: 10).                                        |
 | `--dry-run`             | Go through everything without approving anything.                            |
 
-Everything is loaded once per language and source texts once per suggester, so after the loading phase the chunks
+Everything is loaded once per language and source texts once per suggester, and the competing suggestions and current
+translations (two requests per string) are looked up once per suggester, so after the loading phase the chunks
 follow each other without waiting. The command needs a terminal and refuses to run with `--no-interaction`; use
 `translations:unapproved` and `translations:approve` for scripts.
 
@@ -123,20 +140,25 @@ Shows, per language, the percentage of strings that are
 ./crowdin-cli translations:unapproved 368815 de --user=jdoe --limit=500
 ```
 
-For each unapproved translation the command shows the translation ID, who suggested it (name and username), the
-date, the source text and the translation, so you can check that it looks fine. A summary of the number of pending
-translations per user follows the list.
+For each string with unapproved translations the command shows the translation ID, who suggested it (name and
+username), the date, the source text and the suggestion, so you can check that it looks fine. When several
+suggestions compete for the same string they are all listed, oldest first, under a "N SUGGESTIONS FOR THIS STRING"
+marker. When the string already has an approved translation it is shown in an extra "Current translation (approved)"
+column, and such strings are listed after the strings which have no translation yet, since a suggestion which only
+improves a translation is less urgent. A summary of the number of pending strings per user follows the list (it counts
+one suggestion per string, the one Crowdin lists).
 
 | Option                  | Description                                              |
 |-------------------------|----------------------------------------------------------|
 | `-u`, `--user=USERNAME` | Only show suggestions of this username (or numeric user ID). |
 | `-p`, `--path=PREFIX`   | Only show translations of files whose path in Crowdin *starts with* this value. |
-| `-l`, `--limit=N`       | Maximum number of translations displayed (default: 100). |
+| `-l`, `--limit=N`       | Maximum number of strings displayed (default: 100). Files are cut in order of path, never in the middle of a string. |
 
 The language is the Crowdin language ID, as shown by `project:status` (for example `de`, `fr`, `es-ES`).
 The path filter matches the beginning of the file path as shown in the section headings of the output, for example
 `--path=/14.3/typo3/sysext/backend` (a leading slash is optional). Filters can be combined, e.g. `--user` and `--path`.
-Source texts are fetched one by one, so large limits take a while.
+Source texts of all pending strings are resolved first, then the competing suggestions of the displayed strings are
+looked up (two requests per string), so large limits take a while.
 
 ### Approve translations
 
@@ -156,12 +178,25 @@ Approve everything a given user suggested in one language:
 |----------------|-----------------------------------------------------------------------------|
 | `-u`, `--user` | Approve all unapproved translations suggested by this username (or user ID). |
 | `-p`, `--path` | Approve all unapproved translations of files whose path starts with this value.  |
+| `--drop-rivals`| Also permanently delete the other suggestions competing for the same strings. Cannot be undone. |
 | `--dry-run`    | Only count what would be approved, nothing is changed.                      |
 | `-y`, `--yes`  | Do not ask for confirmation.                                                |
-| `-v`           | List every translation that is about to be approved.                        |
+| `-v`           | List every translation that is about to be approved (and, with `--drop-rivals`, deleted). |
 
 Only translations that are currently unapproved in the given language are touched; other IDs are skipped with a
 warning. Combining IDs with `--user` and/or `--path` approves only the given translations matching these filters.
+
+When several suggestions compete for a string, `translations:unapproved` lists them all and you approve the one you
+prefer by its ID. The others stay pending, unless you add `--drop-rivals`: they are then deleted right after the
+approval succeeded (never if it failed), and the confirmation question tells how many will be deleted. Selecting two
+competing suggestions of the same string together with `--drop-rivals` is refused, since one would delete the other:
+approve one of them by ID. Deletions are not recorded in `var/approvals.log` and cannot be undone by
+`translations:undo`; use `--dry-run -v` to see exactly what would be deleted first.
+
+```bash
+./crowdin-cli translations:approve 368815 de 1951695 --drop-rivals --dry-run -v
+./crowdin-cli translations:approve 368815 de 1951695 --drop-rivals
+```
 
 Recommended workflow for bulk approval:
 

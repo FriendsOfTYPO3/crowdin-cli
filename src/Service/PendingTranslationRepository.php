@@ -8,7 +8,10 @@ use CrowdinApiClient\Crowdin;
 use CrowdinApiClient\Model\File;
 use CrowdinApiClient\Model\LanguageTranslation;
 use CrowdinApiClient\Model\SourceString;
+use CrowdinApiClient\Model\StringTranslation;
+use CrowdinApiClient\Model\StringTranslationApproval;
 use TYPO3\CrowdinCli\Entity\PendingTranslation;
+use TYPO3\CrowdinCli\Entity\StringReview;
 
 /**
  * Retrieves and approves translations through the Crowdin API.
@@ -70,6 +73,71 @@ final readonly class PendingTranslationRepository
         }
 
         return array_values($pending);
+    }
+
+    /**
+     * Gathers, for the given pending translations, the suggestions competing for the same string (or plural form)
+     * and the translation which is already approved for it, if any.
+     *
+     * Crowdin lists only one translation per string when asked for a whole language or file, hence this costs two
+     * requests per string: only do it for what is displayed or reviewed.
+     *
+     * @param list<PendingTranslation> $pending
+     * @return list<StringReview> one per string (and plural form), in the order of the given translations
+     */
+    public function findReviews(int $projectId, string $languageId, array $pending): array
+    {
+        $reviews = [];
+        $loaded = [];
+        foreach ($pending as $translation) {
+            $key = $translation->reviewKey();
+            if (isset($reviews[$key])) {
+                continue;
+            }
+            [$all, $approvedIds] = $loaded[$translation->stringId] ??= $this->loadStringTranslations($projectId, $languageId, $translation->stringId);
+
+            $candidates = [];
+            $approved = null;
+            foreach ($all as $other) {
+                if ($other->pluralForm !== $translation->pluralForm) {
+                    continue;
+                }
+                if (isset($approvedIds[$other->translationId])) {
+                    $approved = $other;
+                } else {
+                    $candidates[$other->translationId] = $other;
+                }
+            }
+            // The given translation is pending by definition, whatever Crowdin lists
+            $candidates[$translation->translationId] ??= $translation;
+            uasort($candidates, static fn(PendingTranslation $a, PendingTranslation $b): int => [$a->createdAt, $a->translationId] <=> [$b->createdAt, $b->translationId]);
+
+            $reviews[$key] = new StringReview($translation->stringId, $translation->pluralForm, array_values($candidates), $approved);
+        }
+
+        return array_values($reviews);
+    }
+
+    /**
+     * @return array{list<PendingTranslation>, array<int, true>} all translations of the string, and the IDs of the approved ones
+     */
+    private function loadStringTranslations(int $projectId, string $languageId, int $stringId): array
+    {
+        $translations = [];
+        foreach ($this->crowdin->stringTranslation->list($projectId, ['stringId' => $stringId, 'languageId' => $languageId, 'limit' => self::LIMIT]) as $item) {
+            /** @var StringTranslation $item */
+            /** @var array{id?: int, username?: string, fullName?: string} $itemUser */
+            $itemUser = $item->getUser();
+            $translations[] = $this->build($item->getId(), $stringId, $item->getText(), $itemUser, $item->getCreatedAt(), $item->getPluralCategoryName() ?: null);
+        }
+
+        $approvedIds = [];
+        foreach ($this->crowdin->stringTranslation->listApprovals($projectId, ['stringId' => $stringId, 'languageId' => $languageId, 'limit' => self::LIMIT]) as $approval) {
+            /** @var StringTranslationApproval $approval */
+            $approvedIds[$approval->getTranslationId()] = true;
+        }
+
+        return [$translations, $approvedIds];
     }
 
     /**

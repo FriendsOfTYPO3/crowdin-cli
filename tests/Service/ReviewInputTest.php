@@ -62,4 +62,52 @@ final class ReviewInputTest extends TestCase
     {
         self::assertNull(ReviewInput::parse($input, 5));
     }
+
+    /**
+     * @return iterable<string, array{string, bool, string, list<int>}>
+     */
+    public static function choiceProvider(): iterable
+    {
+        yield 'approve the second' => ['2', false, ReviewInput::CHOOSE, [2]];
+        yield 'approve, with spaces' => ['  3 ', true, ReviewInput::CHOOSE, [3]];
+        yield 'drop some' => ['d 1,3', false, ReviewInput::DROP, [1, 3]];
+        yield 'drop a range' => ['drop 1-2', false, ReviewInput::DROP, [1, 2]];
+        yield 'skip' => ['s', false, ReviewInput::SKIP, []];
+        yield 'quit' => ['Q', false, ReviewInput::QUIT, []];
+        yield 'keep the current translation' => ['k', true, ReviewInput::KEEP, []];
+    }
+
+    /**
+     * @param list<int> $positions
+     */
+    #[DataProvider('choiceProvider')]
+    public function testParseChoice(string $input, bool $canKeep, string $action, array $positions): void
+    {
+        $result = ReviewInput::parseChoice($input, 3, $canKeep);
+
+        self::assertNotNull($result);
+        self::assertSame($action, $result->action);
+        self::assertSame($positions, $result->positions);
+    }
+
+    /**
+     * @return iterable<string, array{string, bool}>
+     */
+    public static function invalidChoiceProvider(): iterable
+    {
+        yield 'empty' => ['', true];
+        yield 'out of range' => ['4', true];
+        yield 'zero' => ['0', true];
+        yield 'keep without current translation' => ['k', false];
+        yield 'approve all is ambiguous' => ['a', true];
+        yield 'drop out of range' => ['d 4', true];
+        yield 'drop without position' => ['d', true];
+        yield 'several numbers' => ['1 2', true];
+    }
+
+    #[DataProvider('invalidChoiceProvider')]
+    public function testParseChoiceRejectsInvalidInput(string $input, bool $canKeep): void
+    {
+        self::assertNull(ReviewInput::parseChoice($input, 3, $canKeep));
+    }
 }
