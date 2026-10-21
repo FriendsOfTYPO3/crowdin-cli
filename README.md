@@ -4,10 +4,30 @@ Command line tool to work with the TYPO3 Crowdin projects. It can
 
 - list the projects and show their translation status per language,
 - review the suggested translations (also guided, step by step), approve them, and revoke approvals made by mistake,
-- download the translation files of a project in a language,
+- download the translation files of a project in a language, and upload them back as suggestions,
 - report who proofreads and who contributes to a project.
 
 It builds upon [`friendsoftypo3/crowdin-base`](https://github.com/FriendsOfTYPO3/crowdin-base).
+
+## Contents
+
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Guided review (interactive)](#guided-review-interactive)
+  - [List projects](#list-projects)
+  - [Translation status of a project](#translation-status-of-a-project)
+  - [Review unapproved translations](#review-unapproved-translations)
+  - [Approve translations](#approve-translations)
+  - [Revoke approvals](#revoke-approvals)
+- [Translation files](#translation-files)
+  - [Download translation files](#download-translation-files)
+  - [Upload translation files](#upload-translation-files)
+- [Glossary suggestions](#glossary-suggestions)
+- [Reporting](#reporting)
+  - [Proofreaders of a project](#proofreaders-of-a-project)
+  - [Contributors of a project in a language](#contributors-of-a-project-in-a-language)
+- [Development](#development)
 
 ## Requirements
 
@@ -240,6 +260,11 @@ The translations are unapproved again and show up in `translations:unapproved`. 
 Approvals that cannot be revoked stay in the log. Approvals done in the Crowdin web interface are not logged and cannot
 be revoked with this command.
 
+## Translation files
+
+Unlike the commands above, which work on the strings and translations stored in Crowdin, these ones exchange whole
+translation files: you download the files of a language, work on them locally, then upload them back.
+
 ### Download translation files
 
 ```bash
@@ -266,6 +291,45 @@ saving any time or bandwidth, and the exported paths (given by the export patter
 match the source paths `--path` works with elsewhere. Copy the folders you need from the downloaded directory instead.
 
 The project can be given by ID or identifier. This needs the PHP extension `zip`.
+
+### Upload translation files
+
+```bash
+./crowdin-cli translations:upload 368815 fr typo3-cms-fr --dry-run      # see what would be uploaded
+./crowdin-cli translations:upload 368815 fr typo3-cms-fr                # upload everything that changed
+./crowdin-cli translations:upload 368815 fr typo3-cms-fr -p master/Resources/Private/Language/fr.locallang.xlf   # a single file
+```
+
+The counterpart of `translations:download`: give the project, the language and the directory holding the files
+(unchanged structure and names). For each file, one line tells what is going to be sent, then, after a confirmation,
+one line per file shows the upload as it happens.
+
+A file `<folder>/fr.locallang.xlf` belongs to the source file `/<folder>/locallang.xlf` of the project. Only files
+which
+
+- start with the language (`fr.`, so a file of another language is never uploaded to this one),
+- have such a source file in the project, and
+- are XLIFF files
+
+are sent; any other file is listed as skipped, with the reason, and left alone. Of the matching files, only the
+translations Crowdin does not already show for a string are uploaded (a reduced copy of the file is sent), so nothing
+is suggested which is identical to what is approved, and files you did not touch upload nothing at all.
+
+Translations are uploaded as **suggestions**, to be reviewed with `translations:unapproved` and approved like any
+other. Translations identical to their source text are left out by default, as Crowdin would mark them untranslated;
+use `--allow-same-as-source` when a text really is the same in the language.
+
+| Option                   | Description                                                                         |
+|--------------------------|-------------------------------------------------------------------------------------|
+| `-p`, `--path=PREFIX`    | Only upload files whose path in the directory starts with this value.               |
+| `--auto-approve`         | Approve the uploaded translations instead of suggesting them (the question says so). |
+| `--allow-same-as-source` | Also upload translations identical to their source text.                            |
+| `--dry-run`              | Only show what would be uploaded, nothing is sent.                                  |
+| `-y`, `--yes`            | Do not ask for confirmation.                                                        |
+
+Unlike for the download, `--path` does save time here, as files which are not selected are not even compared.
+The token needs write access to the project translations. The whole comparison relies on the identifier of a
+string being the `id` of its `trans-unit`, which is the case for the TYPO3 files.
 
 ## Glossary suggestions
 

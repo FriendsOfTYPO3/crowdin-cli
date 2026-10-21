@@ -15,6 +15,7 @@ use TYPO3\CrowdinCli\Command\ProjectStatusCommand;
 use TYPO3\CrowdinCli\Command\TranslationsApproveCommand;
 use TYPO3\CrowdinCli\Command\TranslationsDownloadCommand;
 use TYPO3\CrowdinCli\Command\TranslationsUndoCommand;
+use TYPO3\CrowdinCli\Command\TranslationsUploadCommand;
 use TYPO3\CrowdinCli\Command\TranslationsUnapprovedCommand;
 use TYPO3\CrowdinCli\Service\ApprovalLog;
 
@@ -44,6 +45,7 @@ foreach ([
     TranslationsApproveCommand::class,
     TranslationsUndoCommand::class,
     TranslationsDownloadCommand::class,
+    TranslationsUploadCommand::class,
     InteractiveCommand::class,
 ] as $command) {
     /** @var Command $instance */
