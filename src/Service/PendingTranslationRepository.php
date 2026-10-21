@@ -28,6 +28,18 @@ final readonly class PendingTranslationRepository
     ) {}
 
     /**
+     * Human-readable name of a language, e.g. "Catalan" for "ca", or null if it cannot be determined.
+     */
+    public function findLanguageName(string $languageId): ?string
+    {
+        try {
+            return $this->crowdin->language->get($languageId)?->getName();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * Translations of the given language which have no approval yet.
      *
      * @param string|null $pathPrefix only translations of files whose path in Crowdin starts with this value

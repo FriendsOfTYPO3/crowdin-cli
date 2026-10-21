@@ -187,7 +187,9 @@ final class InteractiveCommand extends Command
      */
     private function reviewLanguage(SymfonyStyle $io, int $projectId, string $language, ?string $user, ?string $path, int $pageSize): bool
     {
-        $io->writeln(sprintf('Loading the unapproved translations in "%s"...', $language));
+        $languageName = $this->repository->findLanguageName($language);
+        $languageLabel = $languageName !== null ? sprintf('"%s" (%s)', $language, $languageName) : sprintf('"%s"', $language);
+        $io->writeln(sprintf('Loading the unapproved translations in %s...', $languageLabel));
         $pending = $this->repository->findUnapproved($projectId, $language, $user, $path);
         // Crowdin does not list the suggestions of a string which has an approved translation: they are looked for
         // separately, which is only affordable for one suggester at a time
@@ -208,7 +210,7 @@ final class InteractiveCommand extends Command
         while (true) {
             $remaining = $this->open($pending);
             if ($remaining === []) {
-                $io->success(sprintf('Nothing left to review in "%s".', $language));
+                $io->success(sprintf('Nothing left to review in %s.', $languageLabel));
                 return true;
             }
 
