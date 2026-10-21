@@ -320,6 +320,145 @@ final class PendingTranslationRepositoryTest extends TestCase
         self::assertSame([53], array_map(static fn($t): int => $t->translationId, $reviews[1]->candidates));
     }
 
+    public function testFindStringsWithHiddenSuggestionsAsksForApprovedStringsWithAnUnapprovedTranslation(): void
+    {
+        $this->sourceString
+            ->expects(self::once())
+            ->method('list')
+            ->with(123, [
+                'croql' => 'count of languages summary where (language = @language:"de" and is approved) > 0 and count of translations where (count of approvals = 0 and language = @language:"de") > 0',
+                'limit' => 500,
+                'offset' => 0,
+            ])
+            ->willReturn(self::collection([
+                new SourceString(['id' => 30, 'fileId' => 2]),
+                new SourceString(['id' => 20, 'fileId' => 1]),
+                new SourceString(['id' => 10, 'fileId' => 2]),
+            ]));
+
+        $strings = $this->subject->findStringsWithHiddenSuggestions(123, 'de');
+
+        // Ordered by file, then by string
+        self::assertSame([20 => 1, 10 => 2, 30 => 2], $strings);
+    }
+
+    public function testFindStringsWithHiddenSuggestionsNarrowsByUsernameButNotByUserId(): void
+    {
+        $croql = [];
+        $this->sourceString
+            ->method('list')
+            ->willReturnCallback(function (int $projectId, array $params) use (&$croql): ModelCollection {
+                $croql[] = $params['croql'];
+
+                return self::collection([]);
+            });
+
+        $this->subject->findStringsWithHiddenSuggestions(123, 'de', 'pkraume');
+        $this->subject->findStringsWithHiddenSuggestions(123, 'de', '15020195');
+        $this->subject->findStringsWithHiddenSuggestions(123, 'de', 'evil" or true');
+
+        self::assertStringContainsString('count of approvals = 0 and language = @language:"de" and user = @user:"pkraume")', $croql[0]);
+        self::assertStringNotContainsString('@user', $croql[1]);
+        self::assertStringNotContainsString('@user', $croql[2]);
+    }
+
+    public function testFindStringsWithHiddenSuggestionsFiltersByPathPrefix(): void
+    {
+        $fileApi = $this->createMock(FileApi::class);
+        $fileApi->method('list')->willReturnCallback(function (): ModelCollection {
+            return self::collection([new File(['id' => 1, 'path' => '/14.3/typo3/sysext/backend/de.xlf']), new File(['id' => 2, 'path' => '/14.3/typo3/sysext/core/de.xlf'])]);
+        });
+        $crowdin = $this->createMock(Crowdin::class);
+        $crowdin->method('__get')->willReturnMap([
+            ['sourceString', $this->sourceString],
+            ['file', $fileApi],
+        ]);
+        $this->sourceString->method('list')->willReturn(self::collection([
+            new SourceString(['id' => 10, 'fileId' => 1]),
+            new SourceString(['id' => 20, 'fileId' => 2]),
+        ]));
+
+        $strings = (new PendingTranslationRepository($crowdin))->findStringsWithHiddenSuggestions(123, 'de', null, '14.3/typo3/sysext/backend');
+
+        self::assertSame([10 => 1], $strings);
+    }
+
+    public function testFindStringsWithHiddenSuggestionsPaginates(): void
+    {
+        $firstPage = [];
+        for ($i = 1; $i <= 500; $i++) {
+            $firstPage[] = new SourceString(['id' => $i, 'fileId' => 1]);
+        }
+        $offsets = [];
+        $this->sourceString
+            ->expects(self::exactly(2))
+            ->method('list')
+            ->willReturnCallback(function (int $projectId, array $params) use (&$offsets, $firstPage): ModelCollection {
+                $offsets[] = $params['offset'];
+
+                return self::collection($params['offset'] === 0 ? $firstPage : [new SourceString(['id' => 501, 'fileId' => 1])]);
+            });
+
+        self::assertCount(501, $this->subject->findStringsWithHiddenSuggestions(123, 'de'));
+        self::assertSame([0, 500], $offsets);
+    }
+
+    public function testFindHiddenReviewsReturnsTheSuggestionsNextToTheApprovedTranslation(): void
+    {
+        // The case of "Reaktionen", approved, and the later suggestion "Reactions"
+        $this->stringTranslation->method('list')->willReturn(self::collection([
+            self::stringTranslation(1463032, 'steffenmatthes', '2025-12-14T21:48:05+00:00', ['text' => 'Reaktionen']),
+            self::stringTranslation(1951731, 'pkraume', '2026-10-21T08:26:23+00:00', ['text' => 'Reactions']),
+        ]));
+        $this->stringTranslation->method('listApprovals')->willReturn(self::collection([
+            new StringTranslationApproval(['id' => 900, 'translationId' => 1463032, 'stringId' => 379326]),
+        ]));
+
+        $reviews = $this->subject->findHiddenReviews(123, 'de', [379326], 'pkraume');
+
+        self::assertCount(1, $reviews);
+        self::assertSame(379326, $reviews[0]->stringId);
+        self::assertSame(1463032, $reviews[0]->approved?->translationId);
+        self::assertSame([1951731], array_map(static fn($t): int => $t->translationId, $reviews[0]->candidates));
+        self::assertSame('pkraume', $reviews[0]->candidates[0]->username);
+        self::assertTrue($reviews[0]->improvesApproved());
+    }
+
+    public function testFindHiddenReviewsSkipsStringsOfOtherUsersAndStringsWithoutApprovedTranslation(): void
+    {
+        $this->stringTranslation->method('list')->willReturnCallback(fn(int $projectId, array $params): ModelCollection => self::collection([
+            self::stringTranslation($params['stringId'] * 10 + 1, 'alice', '2026-10-19T10:00:00+00:00'),
+            self::stringTranslation($params['stringId'] * 10 + 2, 'bob', '2026-10-20T10:00:00+00:00'),
+        ]));
+        // Only the translation of "alice" is approved on string 1, nothing on string 2
+        $this->stringTranslation->method('listApprovals')->willReturnCallback(fn(int $projectId, array $params): ModelCollection => self::collection(
+            $params['stringId'] === 1 ? [new StringTranslationApproval(['id' => 900, 'translationId' => 11, 'stringId' => 1])] : []
+        ));
+
+        self::assertCount(1, $this->subject->findHiddenReviews(123, 'de', [1, 2]));
+        self::assertSame([12], array_map(static fn($t): int => $t->translationId, $this->subject->findHiddenReviews(123, 'de', [1, 2], 'bob')[0]->candidates));
+        self::assertSame([], $this->subject->findHiddenReviews(123, 'de', [1, 2], 'carol'));
+    }
+
+    public function testFindHiddenReviewsKeepsPluralFormsApart(): void
+    {
+        $this->stringTranslation->method('list')->willReturn(self::collection([
+            self::stringTranslation(51, 'alice', '2026-10-19T10:00:00+00:00', ['pluralCategoryName' => 'one']),
+            self::stringTranslation(52, 'bob', '2026-10-20T10:00:00+00:00', ['pluralCategoryName' => 'one']),
+            self::stringTranslation(53, 'alice', '2026-10-19T10:00:00+00:00', ['pluralCategoryName' => 'other']),
+        ]));
+        // Only the form "one" is approved: the suggestion for "other" improves nothing
+        $this->stringTranslation->method('listApprovals')->willReturn(self::collection([
+            new StringTranslationApproval(['id' => 900, 'translationId' => 51, 'stringId' => 5]),
+        ]));
+
+        $reviews = $this->subject->findHiddenReviews(123, 'de', [5]);
+
+        self::assertCount(1, $reviews);
+        self::assertSame('one', $reviews[0]->pluralForm);
+        self::assertSame([52], array_map(static fn($t): int => $t->translationId, $reviews[0]->candidates));
+    }
+
     public function testFindSourceTextsFetchesEachStringOnce(): void
     {
         $this->sourceString

@@ -33,6 +33,9 @@ final class TranslationsUnapprovedCommandTest extends TestCase
     /** @var array<int, list<StringTranslationApproval>> */
     private array $approvals = [];
 
+    /** @var list<SourceString> the strings which have an approved translation and an unapproved one, which Crowdin does not list */
+    private array $hiddenStrings = [];
+
     protected function setUp(): void
     {
         $this->stringTranslation = $this->createMock(StringTranslationApi::class);
@@ -51,6 +54,9 @@ final class TranslationsUnapprovedCommandTest extends TestCase
         $sourceString = $this->createMock(SourceStringApi::class);
         $sourceString->method('get')->willReturnCallback(
             static fn(int $projectId, int $id): SourceString => new SourceString(['id' => $id, 'fileId' => $id === 1 ? 7 : 8, 'text' => 'Source ' . $id])
+        );
+        $sourceString->method('list')->willReturnCallback(
+            fn(): ModelCollection => self::collection($this->hiddenStrings)
         );
         $file = $this->createMock(FileApi::class);
         $file->method('get')->willReturnCallback(
@@ -136,6 +142,43 @@ final class TranslationsUnapprovedCommandTest extends TestCase
         self::assertStringContainsString('1 string(s) already have an approved translation', $display);
         self::assertStringNotContainsString('SUGGESTIONS FOR THIS STRING', $display);
         self::assertLessThan(strpos($display, '/b/second.xlf'), strpos($display, '/a/first.xlf'));
+    }
+
+    private function hideSuggestionBehindApprovedTranslation(): void
+    {
+        // String 3 is approved ("Texte 300"): Crowdin lists that one only, the suggestion 301 of "pkraume" is hidden behind it
+        $this->hiddenStrings = [new SourceString(['id' => 3, 'fileId' => 8])];
+        $this->translations[3] = [self::suggestion(300, 'dave', '2025-01-01T10:00:00+00:00'), self::suggestion(301, 'pkraume', '2026-10-21T08:26:23+00:00')];
+        $this->approvals[3] = [new StringTranslationApproval(['id' => 501, 'translationId' => 300, 'stringId' => 3])];
+    }
+
+    public function testShowsSuggestionsWhichAreHiddenBehindAnApprovedTranslationLast(): void
+    {
+        $this->hideSuggestionBehindApprovedTranslation();
+
+        $this->tester->execute(['project' => '123', 'language' => 'fr']);
+
+        $display = $this->tester->getDisplay();
+        self::assertStringContainsString('pkraume', $display);
+        self::assertStringContainsString('Texte 301', $display);
+        self::assertStringContainsString('Texte 300', $display);
+        self::assertStringContainsString('Showing 3 of 3 string(s) with unapproved translations.', $display);
+        self::assertStringContainsString('1 string(s) already have an approved translation', $display);
+        // Same file as string 2, which has no translation at all: that one comes first
+        self::assertLessThan(strpos($display, 'Texte 301'), strpos($display, 'Texte 12'));
+        self::assertStringNotContainsString('more string(s) have suggestions behind', $display);
+    }
+
+    public function testLimitLeavesTheHiddenSuggestionsOutWhenThereIsNoRoomAndSaysSo(): void
+    {
+        $this->hideSuggestionBehindApprovedTranslation();
+
+        $this->tester->execute(['project' => '123', 'language' => 'fr', '--limit' => '2']);
+
+        $display = $this->tester->getDisplay();
+        self::assertStringNotContainsString('Texte 301', $display);
+        self::assertStringContainsString('Showing 2 of 3 string(s) with unapproved translations.', $display);
+        self::assertStringContainsString('1 more string(s) have suggestions behind an approved translation', $display);
     }
 
     public function testLimitCutsInTheOrderOfTheFilesAndCountsStrings(): void

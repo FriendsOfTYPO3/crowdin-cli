@@ -189,13 +189,24 @@ final class InteractiveCommand extends Command
     {
         $io->writeln(sprintf('Loading the unapproved translations in "%s"...', $language));
         $pending = $this->repository->findUnapproved($projectId, $language, $user, $path);
+        // Crowdin does not list the suggestions of a string which has an approved translation: they are looked for
+        // separately, which is only affordable for one suggester at a time
+        /** @var array<string, true> $hiddenLoaded suggesters whose hidden suggestions are part of the pending ones */
+        $hiddenLoaded = [];
+        $hiddenCount = 0;
+        if ($user !== null) {
+            $pending = $this->withHiddenSuggestions($io, $pending, $projectId, $language, $user, $path);
+            $hiddenLoaded[strtolower($user)] = true;
+        } else {
+            $hiddenCount = count($this->repository->findStringsWithHiddenSuggestions($projectId, $language, null, $path));
+        }
         if ($pending === []) {
             $io->note('No unapproved translations found.');
             return true;
         }
 
         while (true) {
-            $remaining = array_values(array_filter($pending, fn(PendingTranslation $t): bool => !isset($this->approvedIds[$t->translationId]) && !isset($this->droppedIds[$t->translationId])));
+            $remaining = $this->open($pending);
             if ($remaining === []) {
                 $io->success(sprintf('Nothing left to review in "%s".', $language));
                 return true;
@@ -212,6 +223,9 @@ final class InteractiveCommand extends Command
                 arsort($perUser);
                 $authors = array_keys($perUser);
                 $io->table(['#', 'Suggested by', 'Count'], array_map(static fn(string $author, int $i): array => [$i + 1, $author, $perUser[$author]], $authors, array_keys($authors)));
+                if ($hiddenCount > 0) {
+                    $io->writeln(sprintf('%d more string(s) have suggestions behind an approved translation: they are added once a suggester is picked (or with --user).', $hiddenCount));
+                }
                 $answer = $this->pick($io, sprintf('Suggester (number, "%s" for everybody, "%s" to go back, "%s" to quit)', self::ALL, self::BACK, self::QUIT), $authors, [self::ALL, self::BACK, self::QUIT], false);
                 if ($answer === self::QUIT) {
                     return false;
@@ -220,6 +234,12 @@ final class InteractiveCommand extends Command
                     return true;
                 }
                 $label = $answer === self::ALL ? null : $answer;
+                $username = $label === null ? null : self::usernameOf($label);
+                if ($username !== null && $username !== '(unknown)' && $hiddenCount > 0 && !isset($hiddenLoaded[strtolower($username)])) {
+                    $pending = $this->withHiddenSuggestions($io, $pending, $projectId, $language, $username, $path);
+                    $hiddenLoaded[strtolower($username)] = true;
+                    $remaining = $this->open($pending);
+                }
                 $selection = $label === null ? $remaining : array_values(array_filter($remaining, static fn(PendingTranslation $t): bool => $t->authorLabel() === $label));
             }
 
@@ -233,9 +253,50 @@ final class InteractiveCommand extends Command
         }
     }
 
+    /**
+     * @param list<PendingTranslation> $pending
+     * @return list<PendingTranslation> what has been neither approved nor dropped during this run
+     */
+    private function open(array $pending): array
+    {
+        return array_values(array_filter($pending, fn(PendingTranslation $t): bool => !isset($this->approvedIds[$t->translationId]) && !isset($this->droppedIds[$t->translationId])));
+    }
+
+    /**
+     * Adds the suggestions of the given suggester which compete with an approved translation.
+     *
+     * @param list<PendingTranslation> $pending
+     * @return list<PendingTranslation>
+     */
+    private function withHiddenSuggestions(SymfonyStyle $io, array $pending, int $projectId, string $language, string $user, ?string $path): array
+    {
+        $username = self::usernameOf($user);
+        $stringIds = array_keys($this->repository->findStringsWithHiddenSuggestions($projectId, $language, $username, $path));
+        $io->writeln(sprintf('Looking for suggestions of %s behind an approved translation (%d string(s))...', $username, count($stringIds)));
+        $known = array_column(array_map(static fn(PendingTranslation $t): array => [$t->translationId, true], $pending), 1, 0);
+        foreach ($this->repository->findHiddenReviews($projectId, $language, $stringIds, $username) as $review) {
+            foreach ($review->candidates as $candidate) {
+                if (!isset($known[$candidate->translationId])) {
+                    $known[$candidate->translationId] = true;
+                    $pending[] = $candidate;
+                }
+            }
+        }
+
+        return $pending;
+    }
+
+    /**
+     * The username of a "Full name (username)" label, which is also what is shown for suggesters without a full name.
+     */
+    private static function usernameOf(string $label): string
+    {
+        return preg_match('/\(([^()]+)\)$/', $label, $m) === 1 ? $m[1] : $label;
+    }
+
     private function printEquivalentCommand(SymfonyStyle $io, int $projectId, string $language, ?string $suggester, ?string $path): void
     {
-        $username = $suggester !== null && preg_match('/\(([^()]+)\)$/', $suggester, $m) === 1 ? $m[1] : $suggester;
+        $username = $suggester !== null ? self::usernameOf($suggester) : null;
         $io->writeln(sprintf(
             '<comment>Same list without questions:</comment> ./crowdin-cli translations:unapproved %d %s%s%s',
             $projectId,

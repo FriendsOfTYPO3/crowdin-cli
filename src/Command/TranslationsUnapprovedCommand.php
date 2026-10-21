@@ -64,7 +64,9 @@ final class TranslationsUnapprovedCommand extends Command
             // or a file would be cut at an arbitrary place, in the order of Crowdin
             $sources = $this->repository->findSources($projectId, array_map(static fn($t): int => $t->stringId, $pending));
             $paths = $this->repository->findFilePaths($projectId, array_values(array_unique(array_column($sources, 'fileId'))));
-            $pathOf = static fn(PendingTranslation $t): string => $paths[$sources[$t->stringId]['fileId'] ?? 0] ?? '(unknown file)';
+            $pathOf = static function (PendingTranslation $t) use (&$paths, &$sources): string {
+                return $paths[$sources[$t->stringId]['fileId'] ?? 0] ?? '(unknown file)';
+            };
             usort($pending, static fn(PendingTranslation $a, PendingTranslation $b): int => [$pathOf($a), $a->translationId] <=> [$pathOf($b), $b->translationId]);
 
             // Several suggestions may compete for one string, which is then displayed once
@@ -74,6 +76,19 @@ final class TranslationsUnapprovedCommand extends Command
             }
             $total = count($strings);
             $reviews = $this->repository->findReviews($projectId, $language, array_slice(array_values($strings), 0, $limit));
+
+            // Crowdin does not list the suggestions of a string which has an approved translation: look for them
+            // separately. They come last, as they only try to improve what is approved
+            $hidden = array_diff_key($this->repository->findStringsWithHiddenSuggestions($projectId, $language, $user, $path), $sources);
+            $total += count($hidden);
+            $room = $limit - count($reviews);
+            $shownHidden = $room > 0 ? array_slice(array_keys($hidden), 0, $room) : [];
+            if ($shownHidden !== []) {
+                $reviews = array_merge($reviews, $this->repository->findHiddenReviews($projectId, $language, $shownHidden, $user));
+                $sources += $this->repository->findSources($projectId, $shownHidden);
+                $paths += $this->repository->findFilePaths($projectId, array_values(array_diff(array_unique(array_column($sources, 'fileId')), array_keys($paths))));
+            }
+            $notShownHidden = count($hidden) - count($shownHidden);
         } catch (\Throwable $e) {
             $io->error($e->getMessage());
             return Command::FAILURE;
@@ -132,12 +147,19 @@ final class TranslationsUnapprovedCommand extends Command
             $io->writeln(sprintf('%d string(s) already have an approved translation: their suggestions only try to improve it, so they are less urgent.', $improvements));
         }
 
+        if ($notShownHidden > 0) {
+            $io->writeln(sprintf('%d more string(s) have suggestions behind an approved translation: raise --limit to see them.', $notShownHidden));
+        }
+
         // Summary per author (all unapproved translations) helps to decide on bulk approvals
         $perUser = [];
         foreach ($all as $t) {
             $perUser[$t->authorLabel()] = ($perUser[$t->authorLabel()] ?? 0) + 1;
         }
         arsort($perUser);
+        if ($perUser === []) {
+            return Command::SUCCESS;
+        }
         $io->table(['Suggested by', 'Count'], array_map(null, array_keys($perUser), array_values($perUser)));
 
         return Command::SUCCESS;

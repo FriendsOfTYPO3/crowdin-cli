@@ -145,8 +145,13 @@ username), the date, the source text and the suggestion, so you can check that i
 suggestions compete for the same string they are all listed, oldest first, under a "N SUGGESTIONS FOR THIS STRING"
 marker. When the string already has an approved translation it is shown in an extra "Current translation (approved)"
 column, and such strings are listed after the strings which have no translation yet, since a suggestion which only
-improves a translation is less urgent. A summary of the number of pending strings per user follows the list (it counts
-one suggestion per string, the one Crowdin lists).
+improves a translation is less urgent. Crowdin does not list a suggestion at all as long as its string has an approved
+translation: those are looked up separately and added at the end, as far as `--limit` leaves room (the number of the
+ones left out is shown). A summary of the number of pending strings per user follows the list (it counts one
+suggestion per string, the one Crowdin lists, and none of the suggestions found behind an approved translation).
+
+In the guided mode, such suggestions are added for the suggester you pick (or give with `--user`), since looking
+them up costs two requests per string.
 
 | Option                  | Description                                              |
 |-------------------------|----------------------------------------------------------|

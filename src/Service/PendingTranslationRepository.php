@@ -96,26 +96,129 @@ final readonly class PendingTranslationRepository
             }
             [$all, $approvedIds] = $loaded[$translation->stringId] ??= $this->loadStringTranslations($projectId, $languageId, $translation->stringId);
 
-            $candidates = [];
-            $approved = null;
-            foreach ($all as $other) {
-                if ($other->pluralForm !== $translation->pluralForm) {
-                    continue;
-                }
-                if (isset($approvedIds[$other->translationId])) {
-                    $approved = $other;
-                } else {
-                    $candidates[$other->translationId] = $other;
-                }
-            }
+            [$candidates, $approved] = $this->split($all, $approvedIds, $translation->pluralForm);
             // The given translation is pending by definition, whatever Crowdin lists
             $candidates[$translation->translationId] ??= $translation;
-            uasort($candidates, static fn(PendingTranslation $a, PendingTranslation $b): int => [$a->createdAt, $a->translationId] <=> [$b->createdAt, $b->translationId]);
 
-            $reviews[$key] = new StringReview($translation->stringId, $translation->pluralForm, array_values($candidates), $approved);
+            $reviews[$key] = new StringReview($translation->stringId, $translation->pluralForm, $this->oldestFirst($candidates), $approved);
         }
 
         return array_values($reviews);
+    }
+
+    /**
+     * Strings which already have an approved translation in the given language and still carry unapproved suggestions.
+     *
+     * Crowdin lists only one translation per string when asked for a whole language or file, and that is the approved
+     * one: those suggestions are invisible to findUnapproved(). They are found through the strings instead, which
+     * costs a few requests only. Use findHiddenReviews() to learn what the suggestions are.
+     *
+     * @param string|null $user only strings with a suggestion of this username (the CroQL filter needs a username, a user ID does not narrow the result)
+     * @param string|null $pathPrefix only strings of files whose path in Crowdin starts with this value
+     * @return array<int, int> file ID indexed by string ID, ordered by file and string
+     */
+    public function findStringsWithHiddenSuggestions(int $projectId, string $languageId, ?string $user = null, ?string $pathPrefix = null): array
+    {
+        $language = '@language:"' . self::croqlLiteral($languageId) . '"';
+        // A numeric value may be a user ID: it cannot narrow the query, findHiddenReviews() filters by it afterwards
+        $suggestedBy = $user !== null && !ctype_digit($user) && preg_match('/^[\w.@-]+$/', $user) === 1 ? sprintf(' and user = @user:"%s"', $user) : '';
+        $croql = sprintf(
+            'count of languages summary where (language = %1$s and is approved) > 0 and count of translations where (count of approvals = 0 and language = %1$s%2$s) > 0',
+            $language,
+            $suggestedBy
+        );
+        $fileIds = $pathPrefix === null ? null : array_flip($this->findFileIdsByPathPrefix($projectId, $pathPrefix));
+
+        $strings = [];
+        $offset = 0;
+        do {
+            $items = $this->crowdin->sourceString->list($projectId, ['croql' => $croql, 'limit' => self::LIMIT, 'offset' => $offset]);
+            $count = 0;
+            /** @var SourceString $string */
+            foreach ($items as $string) {
+                $count++;
+                if ($fileIds === null || isset($fileIds[$string->getFileId()])) {
+                    $strings[$string->getId()] = $string->getFileId();
+                }
+            }
+            $offset += self::LIMIT;
+        } while ($count === self::LIMIT);
+
+        // The order of Crowdin is not stable between pages: sort to get always the same list
+        uksort($strings, static fn(int $a, int $b): int => [$strings[$a], $a] <=> [$strings[$b], $b]);
+
+        return $strings;
+    }
+
+    /**
+     * The suggestions of the given strings which compete with an approved translation, see findStringsWithHiddenSuggestions().
+     * Costs two requests per string: only do it for what is displayed or reviewed.
+     *
+     * @param list<int> $stringIds
+     * @param string|null $user only reviews with a suggestion of this username (or user ID)
+     * @return list<StringReview> all of them improve an approved translation, in the order of the given strings
+     */
+    public function findHiddenReviews(int $projectId, string $languageId, array $stringIds, ?string $user = null): array
+    {
+        $reviews = [];
+        foreach ($stringIds as $stringId) {
+            [$all, $approvedIds] = $this->loadStringTranslations($projectId, $languageId, $stringId);
+            $pluralForms = [];
+            foreach ($all as $t) {
+                $pluralForms[$t->pluralForm ?? ''] = $t->pluralForm;
+            }
+            foreach ($pluralForms as $pluralForm) {
+                [$candidates, $approved] = $this->split($all, $approvedIds, $pluralForm);
+                if ($approved === null || $candidates === []) {
+                    continue;
+                }
+                if ($user !== null && !array_any($candidates, static fn(PendingTranslation $t): bool => $t->isSuggestedBy($user))) {
+                    continue;
+                }
+                $reviews[] = new StringReview($stringId, $pluralForm, $this->oldestFirst($candidates), $approved);
+            }
+        }
+
+        return $reviews;
+    }
+
+    /**
+     * @param list<PendingTranslation> $all
+     * @param array<int, true> $approvedIds
+     * @return array{array<int, PendingTranslation>, PendingTranslation|null} the unapproved translations indexed by ID, and the approved one, of a plural form
+     */
+    private function split(array $all, array $approvedIds, ?string $pluralForm): array
+    {
+        $candidates = [];
+        $approved = null;
+        foreach ($all as $other) {
+            if ($other->pluralForm !== $pluralForm) {
+                continue;
+            }
+            if (isset($approvedIds[$other->translationId])) {
+                $approved = $other;
+            } else {
+                $candidates[$other->translationId] = $other;
+            }
+        }
+
+        return [$candidates, $approved];
+    }
+
+    /**
+     * @param non-empty-array<int, PendingTranslation> $candidates
+     * @return non-empty-list<PendingTranslation>
+     */
+    private function oldestFirst(array $candidates): array
+    {
+        uasort($candidates, static fn(PendingTranslation $a, PendingTranslation $b): int => [$a->createdAt, $a->translationId] <=> [$b->createdAt, $b->translationId]);
+
+        return array_values($candidates);
+    }
+
+    private static function croqlLiteral(string $value): string
+    {
+        return addcslashes($value, '"\\');
     }
 
     /**
