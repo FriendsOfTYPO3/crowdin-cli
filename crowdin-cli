@@ -13,6 +13,7 @@ use TYPO3\CrowdinCli\Command\ProjectProofreadersCommand;
 use TYPO3\CrowdinCli\Command\ProjectsListCommand;
 use TYPO3\CrowdinCli\Command\ProjectStatusCommand;
 use TYPO3\CrowdinCli\Command\TranslationsApproveCommand;
+use TYPO3\CrowdinCli\Command\TranslationsDedupeCommand;
 use TYPO3\CrowdinCli\Command\TranslationsDownloadCommand;
 use TYPO3\CrowdinCli\Command\TranslationsUndoCommand;
 use TYPO3\CrowdinCli\Command\TranslationsUploadCommand;
@@ -44,6 +45,7 @@ foreach ([
     TranslationsUnapprovedCommand::class,
     TranslationsApproveCommand::class,
     TranslationsUndoCommand::class,
+    TranslationsDedupeCommand::class,
     TranslationsDownloadCommand::class,
     TranslationsUploadCommand::class,
     InteractiveCommand::class,

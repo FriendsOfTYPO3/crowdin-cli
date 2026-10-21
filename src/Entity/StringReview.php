@@ -39,6 +39,31 @@ final readonly class StringReview
     }
 
     /**
+     * The suggestions which add nothing: the ones identical to the approved translation and, among the others,
+     * all but the oldest of those with the same text. Suggestions are only compared within this string.
+     *
+     * @return list<DuplicateSuggestion>
+     */
+    public function duplicates(): array
+    {
+        $approvedText = $this->approved?->normalizedText();
+        $duplicates = [];
+        $oldest = [];
+        foreach ($this->candidates as $candidate) {
+            $text = $candidate->normalizedText();
+            if ($this->approved !== null && $text === $approvedText) {
+                $duplicates[] = new DuplicateSuggestion($candidate, $this->approved, true);
+            } elseif (isset($oldest[$text])) {
+                $duplicates[] = new DuplicateSuggestion($candidate, $oldest[$text], false);
+            } else {
+                $oldest[$text] = $candidate;
+            }
+        }
+
+        return $duplicates;
+    }
+
+    /**
      * @return list<PendingTranslation> the suggestions which become pointless if the given one is approved
      */
     public function rivalsOf(PendingTranslation $chosen): array

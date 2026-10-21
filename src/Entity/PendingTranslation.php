@@ -40,6 +40,14 @@ final readonly class PendingTranslation
         return $this->stringId . ':' . ($this->pluralForm ?? '');
     }
 
+    /**
+     * The text without what Crowdin does not tell apart either: surrounding whitespace and runs of whitespace.
+     */
+    public function normalizedText(): string
+    {
+        return trim((string)preg_replace('/\s+/u', ' ', $this->text));
+    }
+
     public function isSuggestedBy(string $user): bool
     {
         return ($this->username !== null && strcasecmp($this->username, $user) === 0)

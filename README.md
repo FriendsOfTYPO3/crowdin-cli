@@ -4,6 +4,7 @@ Command line tool to work with the TYPO3 Crowdin projects. It can
 
 - list the projects and show their translation status per language,
 - review the suggested translations (also guided, step by step), approve them, and revoke approvals made by mistake,
+- clean up suggestions which merely repeat an approved translation or another suggestion,
 - download the translation files of a project in a language, and upload them back as suggestions,
 - report who proofreads and who contributes to a project.
 
@@ -21,6 +22,7 @@ It builds upon [`friendsoftypo3/crowdin-base`](https://github.com/FriendsOfTYPO3
   - [Review unapproved translations](#review-unapproved-translations)
   - [Approve translations](#approve-translations)
   - [Revoke approvals](#revoke-approvals)
+  - [Clean up duplicate suggestions](#clean-up-duplicate-suggestions)
 - [Translation files](#translation-files)
   - [Download translation files](#download-translation-files)
   - [Upload translation files](#upload-translation-files)
@@ -78,7 +80,7 @@ Every command except `interactive` accepts `--format=json`, to get one JSON docu
 
 - Progress and notes go to stderr, so stdout can be piped as is. Warnings are returned in a `warnings` key.
 - On failure the exit code is not 0 and the document is `{"error": {"message": "..."}}`.
-- A command cannot ask for confirmation in this mode: `translations:approve`, `translations:undo` and
+- A command cannot ask for confirmation in this mode: `translations:approve`, `translations:undo`, `translations:dedupe` and
   `translations:upload` require `--yes` (or `--dry-run`, for the ones which have it).
 - `translations:approve` and `translations:upload` list what happened to every translation or file (`status`:
   `approved`, `uploaded`, `failed`, ...), also with `--dry-run`, where the status is `pending`.
@@ -276,6 +278,37 @@ a session:
 The translations are unapproved again and show up in `translations:unapproved`. Use `-y` to skip the confirmation.
 Approvals that cannot be revoked stay in the log. Approvals done in the Crowdin web interface are not logged and cannot
 be revoked with this command.
+
+### Clean up duplicate suggestions
+
+Suggestions pile up which add nothing: several users (or imports) suggest the same text for a string, or suggest
+what is already the approved translation. `translations:dedupe` finds and deletes them:
+
+```bash
+./crowdin-cli translations:dedupe 368815 de --dry-run                  # the whole language, only show what would go
+./crowdin-cli translations:dedupe 368815 de --path=/main/typo3/sysext/backend
+./crowdin-cli translations:dedupe 368815 de --yes                      # no confirmation
+```
+
+A suggestion is deleted if, for the same string (and plural form):
+
+- its text is identical to the **approved translation**, or
+- its text is identical to an **older suggestion**: the oldest one is kept, so its author keeps the credit.
+
+Texts are compared ignoring surrounding and repeated whitespace, nothing else (case and punctuation count). Only
+suggestions of the *same* string are compared: the same translation suggested for two different strings which happen to
+share a source text (for example several "Cancel" buttons) is not a duplicate, each string needs its suggestion.
+Different suggestions are never touched, even if you disagree with them: review them with `translations:unapproved`.
+
+| Option         | Description                                                                 |
+|----------------|-----------------------------------------------------------------------------|
+| `-p`, `--path` | Only clean up files whose path starts with this value.                      |
+| `--dry-run`    | Only show what would be deleted, and why.                                   |
+| `-y`, `--yes`  | Do not ask for confirmation (required with `--format=json`, unless `--dry-run`). |
+
+The deletion is permanent and cannot be undone by `translations:undo`: always start with `--dry-run`. Finding the
+suggestions costs two requests per string with pending suggestions, so on a whole language it takes a while: use
+`--path` to go faster, or to clean up one area at a time.
 
 ## Translation files
 
