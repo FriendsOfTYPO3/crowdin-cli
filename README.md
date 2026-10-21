@@ -1,11 +1,17 @@
 # Crowdin CLI for TYPO3
 
-Command line tool to inspect the translation status of the TYPO3 Crowdin projects and to review and approve
-suggested translations. It builds upon [`friendsoftypo3/crowdin-base`](https://github.com/FriendsOfTYPO3/crowdin-base).
+Command line tool to work with the TYPO3 Crowdin projects. It can
+
+- list the projects and show their translation status per language,
+- review the suggested translations (also guided, step by step), approve them, and revoke approvals made by mistake,
+- download the translation files of a project in a language,
+- report who proofreads and who contributes to a project.
+
+It builds upon [`friendsoftypo3/crowdin-base`](https://github.com/FriendsOfTYPO3/crowdin-base).
 
 ## Requirements
 
-- PHP 8.5 with the extension `json`
+- PHP 8.5 with the extensions `json` and `zip`
 - [Composer](https://getcomposer.org/)
 - A Crowdin personal access token with access to the TYPO3 projects. To approve translations, the token owner needs
   the proofreader (or manager) role in these projects. You can generate such a token (scope "Projects") in Crowdin from
@@ -233,6 +239,33 @@ a session:
 The translations are unapproved again and show up in `translations:unapproved`. Use `-y` to skip the confirmation.
 Approvals that cannot be revoked stay in the log. Approvals done in the Crowdin web interface are not logged and cannot
 be revoked with this command.
+
+### Download translation files
+
+```bash
+./crowdin-cli translations:download 368815 fr                         # extracted to ./typo3-cms-fr/
+./crowdin-cli translations:download typo3-cms fr -o /path/to/target   # extracted to the given directory
+./crowdin-cli translations:download 368815 fr --approved-only -v      # skip suggestions, list the files
+```
+
+Asks Crowdin to build the translations of the project in the given language, waits for the build, downloads the
+archive and extracts it. The files keep the structure and names Crowdin exports them with.
+
+Without `--output-dir` (`-o`), the files go to a new directory named `<project identifier>-<language>` in the
+current directory, so they never get mixed with other files. With `--output-dir`, that directory is used as is
+(created if needed): files with the same name are overwritten, other files are left alone.
+
+| Option                | Description                                                                    |
+|-----------------------|--------------------------------------------------------------------------------|
+| `-o`, `--output-dir`  | Directory to extract the files to.                                             |
+| `--approved-only`     | Only export approved translations (by default, suggestions are included too).  |
+
+There is no `--path` option, unlike in the other commands: Crowdin cannot build only a subtree of a project, so the
+whole project would be built and downloaded anyway. Filtering what is extracted would only hide files locally, without
+saving any time or bandwidth, and the exported paths (given by the export pattern of the project) do not necessarily
+match the source paths `--path` works with elsewhere. Copy the folders you need from the downloaded directory instead.
+
+The project can be given by ID or identifier. This needs the PHP extension `zip`.
 
 ## Glossary suggestions
 
