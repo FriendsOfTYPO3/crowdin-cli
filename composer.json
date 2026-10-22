@@ -28,7 +28,7 @@
     "ext-json": "*",
     "ext-zip": "*",
     "crowdin/crowdin-api-client": "^1.26",
-    "friendsoftypo3/crowdin-base": "^0.2.1",
+    "friendsoftypo3/crowdin-base": "^0.4",
     "symfony/console": "^8.0"
   },
   "require-dev": {

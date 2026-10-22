@@ -7,6 +7,7 @@ namespace TYPO3\CrowdinCli\Command;
 use FriendsOfTYPO3\CrowdinBase\Configuration\ConfigurationReader;
 use FriendsOfTYPO3\CrowdinBase\Configuration\ConfigurationWriter;
 use FriendsOfTYPO3\CrowdinBase\Configuration\Entity\Language;
+use FriendsOfTYPO3\CrowdinBase\Console\Output\ProjectOutput;
 use FriendsOfTYPO3\CrowdinBase\Repository\ProjectRepository;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -39,7 +40,7 @@ final class ProjectsListCommand extends Command
 
         try {
             if ($input->getOption('refresh')) {
-                $this->writer->write($this->repository->findAll());
+                $this->writer->write($this->repository->findAll(), new ProjectOutput($io));
             }
             $projects = $this->reader->read();
         } catch (\Throwable $e) {
