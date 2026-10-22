@@ -51,7 +51,7 @@ Edit `.env`:
 
 | Variable               | Description                                                                          |
 |------------------------|--------------------------------------------------------------------------------------|
-| `CROWDIN_ACCESS_TOKEN` | Your Crowdin access token (Generate tokens at: https://crowdin.com/settings#api-key) |
+| `CROWDIN_ACCESS_TOKEN` | Your Crowdin access token (Generate tokens at: [Account Settings → API](https://crowdin.com/settings#api-key) |
 | `CONFIGURATION_FILE`   | Path of the project configuration file, relative to the project root. Keep the default `var/configuration.json`. |
 
 Never commit `.env`, it contains your token.
