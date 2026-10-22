@@ -23,10 +23,10 @@ It builds upon [`friendsoftypo3/crowdin-base`](https://github.com/FriendsOfTYPO3
   - [Approve translations](#approve-translations)
   - [Revoke approvals](#revoke-approvals)
   - [Clean up duplicate suggestions](#clean-up-duplicate-suggestions)
+- [Glossary suggestions](#glossary-suggestions)
 - [Translation files](#translation-files)
   - [Download translation files](#download-translation-files)
   - [Upload translation files](#upload-translation-files)
-- [Glossary suggestions](#glossary-suggestions)
 - [Reporting](#reporting)
   - [Proofreaders of a project](#proofreaders-of-a-project)
   - [Contributors of a project in a language](#contributors-of-a-project-in-a-language)
@@ -310,6 +310,23 @@ The deletion is permanent and cannot be undone by `translations:undo`: always st
 suggestions costs two requests per string with pending suggestions, so on a whole language it takes a while: use
 `--path` to go faster, or to clean up one area at a time.
 
+## Glossary suggestions
+
+In the Crowdin web interface, the pending approvals of a language list a "Glossary" entry next to your source files.
+Crowdin stores the glossary of a project as a regular file (title "Glossary", path `/typo3-cms.tbx` in the TYPO3
+projects) whose strings are the glossary terms. Suggested glossary translations are therefore listed and approved
+like any other translation, under the path `/typo3-cms.tbx`:
+
+```bash
+./crowdin-cli translations:unapproved 368815 fr --path=/typo3-cms.tbx
+./crowdin-cli translations:approve 368815 fr --path=/typo3-cms.tbx --dry-run -v
+./crowdin-cli interactive -P 368815 -L fr --path=/typo3-cms.tbx   # or review them chunk by chunk
+```
+
+Without `--path`, glossary entries are mixed in the list with the other files, and the default `--limit` may hide
+them. Note that this is different from the glossary resource itself (*Resources > Glossaries*), whose terms and
+concepts have no review state in the Crowdin API.
+
 ## Translation files
 
 Unlike the commands above, which work on the strings and translations stored in Crowdin, these ones exchange whole
@@ -380,23 +397,6 @@ use `--allow-same-as-source` when a text really is the same in the language.
 Unlike for the download, `--path` does save time here, as files which are not selected are not even compared.
 The token needs write access to the project translations. The whole comparison relies on the identifier of a
 string being the `id` of its `trans-unit`, which is the case for the TYPO3 files.
-
-## Glossary suggestions
-
-In the Crowdin web interface, the pending approvals of a language list a "Glossary" entry next to your source files.
-Crowdin stores the glossary of a project as a regular file (title "Glossary", path `/typo3-cms.tbx` in the TYPO3
-projects) whose strings are the glossary terms. Suggested glossary translations are therefore listed and approved
-like any other translation, under the path `/typo3-cms.tbx`:
-
-```bash
-./crowdin-cli translations:unapproved 368815 fr --path=/typo3-cms.tbx
-./crowdin-cli translations:approve 368815 fr --path=/typo3-cms.tbx --dry-run -v
-./crowdin-cli interactive -P 368815 -L fr --path=/typo3-cms.tbx   # or review them chunk by chunk
-```
-
-Without `--path`, glossary entries are mixed in the list with the other files, and the default `--limit` may hide
-them. Note that this is different from the glossary resource itself (*Resources > Glossaries*), whose terms and
-concepts have no review state in the Crowdin API.
 
 ## Reporting
 
